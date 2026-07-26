@@ -6,7 +6,7 @@ export interface Dict {
 
 export function createDict(raw: Record<string, string>): Dict {
   const keys = new Set(Object.keys(raw))
-  let maxKeyLength = 1
+  let maxKeyLength = 0
   for (const k of keys) if (k.length > maxKeyLength) maxKeyLength = k.length
 
   return {
@@ -37,5 +37,11 @@ export function loadDict(): Promise<Dict> {
       return r.json()
     })
     .then(createDict)
+    .catch((err) => {
+      // Don't memoise a rejection: a transient network blip would otherwise
+      // permanently break word lookup for the rest of the session.
+      cached = null
+      throw err
+    })
   return cached
 }
