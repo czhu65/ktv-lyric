@@ -8,3 +8,4 @@ dist
 
 # Logs
 npm-debug.log*
+coverage
