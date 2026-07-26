@@ -6,5 +6,6 @@ export default defineConfig({
     setupFiles: ['./src/test-setup.ts'],
     globals: true,
     env: { BASE_URL: '/ktv-lyric/' },
+    exclude: ['**/node_modules/**', '**/*.live.test.ts'],
   },
 })
