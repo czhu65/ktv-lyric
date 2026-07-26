@@ -596,8 +596,8 @@ git commit -m "feat: transcode amazonHiuJin syllable audio to 48kbps mono mp3"
 - Consumes: nothing.
 - Produces:
   - `normalize(text: string): string`
-  - `isSimplified(text: string): boolean`
-  - `toTraditional(text: string): Promise<string>`
+  - `isSimplified(text: string): Promise<boolean>` — **async.** Detects by round-tripping through opencc and comparing, not by a character list. A hand-written marker set was tried first and measured at an 88% miss rate with false positives on ordinary Traditional words (電台, 只是, 方向); it was deleted rather than repaired.
+  - `toTraditional(text: string): Promise<string>` — idempotent on Traditional input.
   - `toSimplified(text: string): Promise<string>`
   - `scriptVariants(query: string): Promise<string[]>` — 1 or 2 deduped variants for search fan-out.
 
@@ -2742,8 +2742,9 @@ export default function App() {
     const out: Line[] = []
     for (const l of raw) {
       // Never feed Simplified to to-jyutping — it fails silently on mergers.
-      let text = normalize(l.text)
-      if (isSimplified(text)) text = await toTraditional(text)
+      // toTraditional is idempotent on Traditional input, so no detection step
+      // is needed here; isSimplified exists for the search fan-out.
+      const text = await toTraditional(normalize(l.text))
       // Annotate the WHOLE line. A break inside a word changes the reading.
       out.push({
         tokens: annotateLine(text, { words: dict.keys(), maxWordLength: dict.maxKeyLength }),

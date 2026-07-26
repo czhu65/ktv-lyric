@@ -168,6 +168,13 @@ Therefore:
 1. **Every search issues both script variants** to both iTunes and LRCLIB, then merges and dedupes.
 2. `opencc-js` moves onto the critical path — lazy-loaded on first search (~440 KB gzip for `cn2t`),
    not at boot.
+   **Detection is done by round-tripping through opencc and comparing, never by a character list.**
+   A hand-written "Simplified-only" marker set was implemented first and measured: **88% miss rate**
+   (it failed on 学, 说, 这, 时, 电, 见, 来, 对, 会) *and* false positives on ordinary Traditional
+   words, because 向 is script-neutral and 只/台 are the standard HK Traditional forms — so 電台,
+   舞台, 平台, 只是, 只有 and 方向 were all misclassified. The round-trip is exact and measured at
+   100% detection with zero false positives. This makes `isSimplified` async, which is fine: every
+   caller is already async.
 3. **Simplified text must never reach the Jyutping engine.** It fails *silently and confidently* on
    merger characters: 萝卜 → `buk1` instead of `baak6`; 忧郁 → `juk1` instead of `wat1`; 干部 →
    `gon1` instead of `gon3`. Roughly 6 of 20 tested merger cases fail. Convert to Traditional first.
