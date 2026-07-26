@@ -112,8 +112,8 @@ Each module is independently testable and knows nothing of the others' internals
 | `script/` | NFC normalize; detect Simplified; lazy-load opencc; convert to Traditional | opencc-js (lazy chunk) |
 | `search/` | Dual-script query fan-out, merge + dedupe, debounce, backoff | `script/`, fetch |
 | `lyrics/` | LRCLIB fetch, LRC `[mm:ss.xx]` parsing, paste parsing → canonical `Song` | `script/` |
-| `annotate/` | Full source line → `Token[]` (characters + syllables + word grouping) | to-jyutping |
-| `dict/` | Gloss lookup with per-character decomposition fallback | the generated JSON |
+| `annotate/` | Full source line → `Token[]`. Readings from to-jyutping; grouping by longest-match over an **injected** key set | to-jyutping |
+| `dict/` | Gloss lookup with per-character decomposition fallback; supplies the key set to `annotate/` | the generated JSON |
 | `romanize/` | Jyutping → Yale (pure table, ~40 lines) | nothing |
 | `audio/` | Syllable → `AudioBuffer`; fetch, decode, LRU cache | Web Audio |
 | `player/` | Playback state machine + scheduling. **No DOM knowledge.** | `audio/` |
@@ -186,10 +186,31 @@ Therefore:
 
 **Library:** `to-jyutping@3.1.1` (CanCLID, BSD-2-Clause, zero dependencies). One self-contained file,
 389 KB raw / 273 KB gzip, embedding a 48,262-entry trie (30,206 single characters + 18,056 words up
-to 6 characters). **The trie is the word segmenter** — word grouping therefore costs nothing extra.
+to 6 characters).
 
-`getJyutpingList()` returns `[char, jyutping | null][]`, which maps almost directly onto the render
-and audio model.
+`getJyutpingList(text)` returns `[char, jyutping | null][]` — **flat, one pair per character.**
+
+### Word boundaries are not available from the library
+
+**Verified against the README, and it corrects an earlier assumption in this document.** The trie
+performs multi-character matching *internally* to choose the right reading, but **no exported function
+exposes the resulting segmentation.** There is no `segment()`, `tokenize()`, or word-list API. The full
+exported surface is `getJyutpingList`, `getJyutpingText`, `getJyutpingCandidates`, `customize`, and
+`jyutpingToIPA` — all of which are per-character or whole-string. Word grouping therefore is **not**
+free and needs its own mechanism.
+
+**Mechanism: greedy longest-match against the gloss dictionary's own keys**, trying lengths 6 → 2 and
+falling back to a single character. This needs no extra asset, because §8 already ships that keyed map,
+and it has a useful property: **every multi-character group is guaranteed to have a gloss**, so grouping
+and tap-to-define never disagree.
+
+Segmentation is injected into `annotate/` as a plain key-set parameter rather than imported, so the
+module stays decoupled from `dict/` and testable against a five-word fixture.
+
+**Readings are unaffected by segmentation.** They always come from `getJyutpingList` over the full
+line. If our grouping ever diverges from the trie's internal matching, the consequence is cosmetic —
+a word rendered as two groups — never a wrong pronunciation. That asymmetry is why this approach is
+safe despite reimplementing part of the library's behaviour.
 
 ### Three traps, each of which silently corrupts output
 
@@ -468,10 +489,10 @@ navigation and screen-reader semantics for free, padded to ≥44 px on mobile. Y
 transform over the same `Token` model. Jyutping-above vs jyutping-below is a toggle — below is a
 legitimate Chinese convention and keeps the lyric line visually dominant.
 
-**Word grouping** comes free from the trie's segmentation and is rendered as *spacing*, not
-decoration: characters within a `Token` sit tight, and a small gap separates tokens. No boxes, no
-underlines, no colour — the lyric must still read as a lyric. Multi-character tokens get a subtle
-hover/focus affordance on desktop only.
+**Word grouping** (derived per §6, not from the library) is rendered as *spacing*, not decoration:
+characters within a `Token` sit tight, and a small gap separates tokens. No boxes, no underlines, no
+colour — the lyric must still read as a lyric. Multi-character tokens get a subtle hover/focus
+affordance on desktop only.
 
 **The tap gesture does two things at once, by design.** Tapping a character both plays that
 character's audio *and* opens the gloss popover for the **token containing it** — one gesture, two
@@ -535,6 +556,8 @@ Stated plainly rather than papered over.
 | iTunes Search is an undocumented-SLA legacy endpoint | **Accepted risk.** Mitigated by falling back to LRCLIB search |
 | `cantone`'s MIT tag over vendor-synthesized audio | **Accepted with mitigation** — `amazonHiuJin` only; Polly self-generation is the clean upgrade |
 | Overlap between the trie's syllable set and `amazonHiuJin`'s 3,885 | **Unmeasured.** Build-time assertion will enumerate the gap |
+| Our longest-match grouping vs the trie's internal segmentation | **Will diverge somewhere; unmeasured how often.** Accepted: the divergence is cosmetic only, never a wrong reading (§6) |
+| How sparse word grouping looks with an 18,932-key dictionary | **Unmeasured.** If too sparse, the fallback is extracting the full 48,262-entry word list from `to-jyutping`'s `src/trie.txt` at build time |
 | Hand-curated colloquial override list (~4 KB) | **Estimated.** The list does not exist yet |
 | Dual-keying the dictionary for Simplified (~+270 KB gzip) | **Estimated, not remeasured post-intersection.** Traditional-only keying left 86 of 1,322 lyric characters unglossed, all Simplified — so opencc-js is load-bearing either way |
 | GitHub Pages/Fastly gzip level vs local `gzip -9` | **Unmeasured.** Expect a few percent worse |
