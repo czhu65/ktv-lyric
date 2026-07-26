@@ -32,9 +32,40 @@ describe('parseLyricText', () => {
     expect(parseLyricText('唱　歌')[0].text).toBe('唱 歌')
   })
 
-  it('strips stacked timestamp tags on one line, keeping only the first as timeMs', () => {
+  it('emits one entry per stacked timestamp tag, sharing the same text', () => {
     expect(parseLyricText('[00:01.00][00:02.00]唱歌')).toEqual([
       { text: '唱歌', timeMs: 1_000 },
+      { text: '唱歌', timeMs: 2_000 },
+    ])
+  })
+
+  it('strips stacked tags separated by whitespace the same as adjacent ones', () => {
+    expect(parseLyricText('[00:01.00] [00:02.00]唱歌')).toEqual([
+      { text: '唱歌', timeMs: 1_000 },
+      { text: '唱歌', timeMs: 2_000 },
+    ])
+  })
+
+  it('emits one entry per tag for three stacked timestamps', () => {
+    expect(parseLyricText('[00:01.00][00:02.00][00:03.00]唱歌')).toEqual([
+      { text: '唱歌', timeMs: 1_000 },
+      { text: '唱歌', timeMs: 2_000 },
+      { text: '唱歌', timeMs: 3_000 },
+    ])
+  })
+
+  it('keeps a stacked line with no remaining text out of the result entirely', () => {
+    expect(parseLyricText('[00:01.00][00:02.00]')).toEqual([])
+  })
+
+  it('keeps ordering sensible when a stacked line sits among ordinary lines', () => {
+    expect(
+      parseLyricText('[00:00.50]起\n[00:01.00][00:02.00]唱歌\n[00:03.00]完'),
+    ).toEqual([
+      { text: '起', timeMs: 500 },
+      { text: '唱歌', timeMs: 1_000 },
+      { text: '唱歌', timeMs: 2_000 },
+      { text: '完', timeMs: 3_000 },
     ])
   })
 })

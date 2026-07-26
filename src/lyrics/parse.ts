@@ -13,28 +13,30 @@ export function parseLyricText(text: string): SourceLine[] {
     const line = raw.trim()
     if (!line || META.test(line)) continue
 
-    const m = TIME.exec(line)
-    let timeMs: number | undefined
+    // Some LRC sources stack several timestamp tags before one line of text
+    // to mark the same lyric repeating at multiple times (e.g. a chorus).
+    // Collect every leading tag and emit one entry per timestamp, all
+    // sharing the same text, in the order the tags appeared. Re-trimming
+    // `body` between iterations lets this consume tags separated by
+    // whitespace, not just tags butted directly against each other.
+    const times: number[] = []
     let body = line
-    if (m) {
+    let m: RegExpExecArray | null
+    while ((m = TIME.exec(body))) {
       const [, mm, ss, frac] = m
       const ms = frac.length === 3 ? Number(frac) : Number(frac) * 10
-      timeMs = Number(mm) * 60_000 + Number(ss) * 1_000 + ms
-      body = line.slice(m[0].length)
-
-      // Some LRC sources stack several timestamp tags before one line of text
-      // to mark the same lyric repeating at multiple times. We keep only the
-      // first as this line's timeMs; without this loop the later tags would
-      // leak into `body` as literal text.
-      let extra: RegExpExecArray | null
-      while ((extra = TIME.exec(body))) {
-        body = body.slice(extra[0].length)
-      }
+      times.push(Number(mm) * 60_000 + Number(ss) * 1_000 + ms)
+      body = body.slice(m[0].length).trim()
     }
 
     body = body.replace(/　/g, ' ').trim()
     if (!body) continue
-    out.push(timeMs === undefined ? { text: body } : { text: body, timeMs })
+
+    if (times.length === 0) {
+      out.push({ text: body })
+    } else {
+      for (const timeMs of times) out.push({ text: body, timeMs })
+    }
   }
   return out
 }
