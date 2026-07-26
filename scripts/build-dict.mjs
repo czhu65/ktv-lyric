@@ -5,7 +5,8 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 import { parseLine, cleanGloss } from './lib/cedict.mjs'
 
 const CEDICT = 'https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz'
-const CANTO = 'https://cantonese.org/cccanto-170202.zip'
+// CC-Canto source: https://cantonese.org/cccanto-170202.zip
+// Not fetched here — pre-extracted to scripts/.cache/cccanto.txt (see Step 5 note below).
 // Headwords are capped at 2 characters. Most Chinese compounds are two chars, so
 // the cap costs almost nothing in grouping quality and halves the payload — and it
 // stops greedy longest-match collapsing 愛情故事 into one opaque unit when 愛情 · 故事

@@ -26,6 +26,14 @@ describe('parseLine', () => {
     expect(parseLine('# comment')).toBeNull()
     expect(parseLine('')).toBeNull()
   })
+
+  it('parses a CC-Canto line with a trailing "# adapted from cc-cedict" comment', () => {
+    const r = parseLine('三 三 [san1] {saam1} /1. three 2. (slang) love affair (usually refers to a female)/ # adapted from cc-cedict')
+    expect(r).not.toBeNull()
+    expect(r.trad).toBe('三')
+    expect(r.glosses).toEqual(['1. three 2. (slang) love affair (usually refers to a female)'])
+    expect(r.glosses.some((g) => g.includes('adapted from cc-cedict'))).toBe(false)
+  })
 })
 
 describe('cleanGloss', () => {
@@ -41,5 +49,17 @@ describe('cleanGloss', () => {
 
   it('returns null when nothing survives cleaning', () => {
     expect(cleanGloss(['CL:個|个[ge4]'])).toBeNull()
+  })
+
+  it('does not filter a noise phrase that appears mid-string (documented limitation)', () => {
+    // NOISE patterns are anchored to ^, so "Mandarin equivalent:" here is not
+    // stripped because it doesn't start the gloss — this is the real 乜嘢
+    // source string from CC-CEDICT. The gloss survives uncleaned and then
+    // gets word-boundary truncated, producing a dangling fragment. This test
+    // documents that this is the current, known behaviour rather than an
+    // accident — a single hand-curated override in overrides.json is the
+    // fix for this specific word, not a change to NOISE anchoring.
+    const raw = ['what? (Cantonese) (Mandarin equivalent: 什麼|什么[shen2 me5])']
+    expect(cleanGloss(raw)).toBe('what? (Cantonese) (Mandarin equivalent:')
   })
 })

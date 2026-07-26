@@ -1,7 +1,9 @@
 // CC-CEDICT / CC-Canto share the format:
 //   TRAD SIMP [pinyin] {jyutping}? /gloss/gloss/
 // Slashes can appear inside {} — match the braces before splitting on '/'.
-const LINE = /^(\S+)\s+(\S+)\s+\[([^\]]*)\]\s*(?:\{([^}]*)\})?\s*\/(.*)\/\s*$/
+// CC-Canto lines may also carry a trailing '#' comment after the closing '/'
+// (e.g. "# adapted from cc-cedict"); allow and discard it.
+const LINE = /^(\S+)\s+(\S+)\s+\[([^\]]*)\]\s*(?:\{([^}]*)\})?\s*\/(.*)\/\s*(?:#.*)?$/
 
 const NOISE = [/^CL:/, /^Mandarin equivalent:/, /^variant of /, /^see /, /^old variant of /]
 
