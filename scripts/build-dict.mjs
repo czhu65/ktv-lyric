@@ -28,12 +28,17 @@ const cantoRows = parseAll(readFileSync('scripts/.cache/cccanto.txt', 'utf8'))
 const cedictRows = parseAll(await fetchText(CEDICT))
 console.log(`CC-Canto rows: ${cantoRows.length}  CC-CEDICT rows: ${cedictRows.length}`)
 
-// CC-Canto FIRST. The map below is first-write-wins, so load order is what gives
-// CC-Canto's Cantonese senses priority over CC-CEDICT's Mandarin ones. CC-CEDICT
-// glosses 諗 as "to reprimand" and 睇 as "to cast a sidelong glance", which are
-// wrong for Cantonese; CC-Canto has "to think" and "to look at".
+// CC-CEDICT first. It is the better general dictionary and, with the extended
+// NOISE filter above skipping surname and bound-form rows, it gives the
+// correct primary sense for common characters. CC-Canto then fills only the
+// keys CC-CEDICT lacks — which is where the Cantonese-only vocabulary lives
+// (入面, 落嚟, 我哋). The colloquial characters CC-CEDICT gets wrong for
+// Cantonese (睇, 諗, 佢, 嘅) are handled by overrides.json, which is applied
+// last and wins over both. Measured 2026-07-26: both orderings produce
+// identical glosses for every colloquial test word, while CC-CEDICT-first is
+// markedly better on common characters.
 const dict = {}
-for (const r of [...cantoRows, ...cedictRows]) {
+for (const r of [...cedictRows, ...cantoRows]) {
   if (r.trad.length > MAX_WORD) continue
   if (dict[r.trad]) continue
   const g = cleanGloss(r.glosses)

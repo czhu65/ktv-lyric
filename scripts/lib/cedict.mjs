@@ -5,7 +5,10 @@
 // (e.g. "# adapted from cc-cedict"); allow and discard it.
 const LINE = /^(\S+)\s+(\S+)\s+\[([^\]]*)\]\s*(?:\{([^}]*)\})?\s*\/(.*)\/\s*(?:#.*)?$/
 
-const NOISE = [/^CL:/, /^Mandarin equivalent:/, /^variant of /, /^see /, /^old variant of /]
+const NOISE = [
+  /^CL:/, /^Mandarin equivalent:/, /^variant of /, /^see /, /^old variant of /,
+  /^surname /, /^used in /, /^abbr\. for /, /^\(bound form\)$/,
+]
 
 export function parseLine(line) {
   if (!line || line.startsWith('#') || line.startsWith('%')) return null
@@ -25,8 +28,16 @@ export function cleanGloss(glosses, max = 40) {
   const kept = glosses.filter((g) => !NOISE.some((re) => re.test(g)))
   if (kept.length === 0) return null
   let out = kept[0].trim()
-  if (out.length <= max) return out
-  const cut = out.slice(0, max)
-  const sp = cut.lastIndexOf(' ')
-  return (sp > max * 0.5 ? cut.slice(0, sp) : cut).trim()
+  // CC-Canto packs numbered senses into one segment:
+  //   "(noun) 1. seminar; 2. meeting; 3."
+  // Keep the part-of-speech tag, then the FIRST sense only.
+  const m = /^(\([^)]*\)\s*)?\d+\.\s*(.+)$/.exec(out)
+  if (m) out = (m[1] ?? '') + m[2].split(/\s*\d+\.\s*/)[0]
+  out = out.replace(/[;,]\s*$/, '').trim()
+  if (out.length > max) {
+    const cut = out.slice(0, max)
+    const sp = cut.lastIndexOf(' ')
+    out = (sp > max * 0.5 ? cut.slice(0, sp) : cut).replace(/[;,(]\s*$/, '').trim()
+  }
+  return out || null
 }

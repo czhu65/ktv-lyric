@@ -62,4 +62,33 @@ describe('cleanGloss', () => {
     const raw = ['what? (Cantonese) (Mandarin equivalent: 什麼|什么[shen2 me5])']
     expect(cleanGloss(raw)).toBe('what? (Cantonese) (Mandarin equivalent:')
   })
+
+  it('drops a surname-only row, leaving null so the next row can supply a real gloss', () => {
+    expect(cleanGloss(['surname Wong'])).toBeNull()
+  })
+
+  it('drops a bound-form cross-reference row', () => {
+    expect(cleanGloss(['used in 上聲|上声[shang3 sheng1]'])).toBeNull()
+  })
+
+  it('drops an abbreviation row', () => {
+    expect(cleanGloss(['abbr. for Israel 以色列[Yi3 se4 lie4]'])).toBeNull()
+  })
+
+  it('keeps a leading part-of-speech tag and only the first numbered sense', () => {
+    expect(cleanGloss(['(noun) 1. seminar; 2. meeting; 3. conference'])).toBe('(noun) seminar')
+  })
+
+  it('takes the first numbered sense even when numbering does not start at 1', () => {
+    expect(cleanGloss(['8. to climb 9. to get onto'])).toBe('to climb')
+  })
+
+  it('never leaves dangling punctuation after truncation', () => {
+    // The 40-char cut lands right on a ';' (index 39) with no earlier space
+    // to fall back to, so the naive slice ends in dangling punctuation.
+    const long = ['a'.repeat(39) + ';' + 'b'.repeat(10)]
+    const out = cleanGloss(long)
+    expect(out.length).toBeLessThanOrEqual(40)
+    expect(out).not.toMatch(/[;,(]\s*$/)
+  })
 })
