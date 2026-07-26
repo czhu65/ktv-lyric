@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi } from 'vitest'
 import LyricView from './LyricView'
+import { renderCount as lyricLineRenderCount, resetRenderCount as resetLyricLineRenderCount } from './LyricLine'
 import { createDict } from '../dict'
 import { DEFAULT_SETTINGS } from '../storage'
 
@@ -23,6 +24,7 @@ const dict = createDict({ '唱歌': 'to sing a song' })
 const engine = () => ({
   unlock: vi.fn(async () => {}), has: (_s: string) => true, duration: () => 0.4,
   load: vi.fn(async () => null), prefetch: vi.fn(async () => {}), play: vi.fn(() => 0.4),
+  playSequence: vi.fn(),
 })
 
 const setup = (over: Record<string, unknown> = {}) => {
@@ -57,7 +59,10 @@ describe('LyricView', () => {
   it('plays the character audio on tap', async () => {
     const e = setup()
     await userEvent.click(screen.getByRole('button', { name: /唱/ }))
-    expect(e.play).toHaveBeenCalledWith('coeng1')
+    // Syllables of a tapped character are scheduled back-to-back via
+    // playSequence, not fired individually via play() (see Finding 3: a
+    // multi-syllable character must not overlap its own syllables).
+    expect(e.playSequence).toHaveBeenCalledWith(['coeng1'])
   })
 
   it('opens the gloss for the enclosing TOKEN, not the character', async () => {
@@ -134,7 +139,7 @@ describe('LyricView', () => {
     await user.tab()
     expect(screen.getByRole('button', { name: /唱/ })).toHaveFocus()
     await user.keyboard('{Enter}')
-    expect(e.play).toHaveBeenCalledWith('coeng1')
+    expect(e.playSequence).toHaveBeenCalledWith(['coeng1'])
     expect(await screen.findByText('to sing a song')).toBeInTheDocument()
 
     await user.tab()
@@ -144,5 +149,35 @@ describe('LyricView', () => {
     // very next stop is the popover's close button.
     await user.tab()
     expect(screen.getByRole('button', { name: /close/i })).toHaveFocus()
+  })
+
+  it('does not re-render a non-active line when activeChar moves within a different line', () => {
+    // Two lines, each with its own Chinese character, so line 1's props are
+    // fully independent of anything happening in line 0.
+    const twoLines = [
+      { tokens: [{ chars: [{ char: '甲', syllables: ['gaap3'] }, { char: '乙', syllables: ['jyut6'] }] }] },
+      { tokens: [{ chars: [{ char: '丙', syllables: ['bing2'] }] }] },
+    ]
+    const e = engine()
+    const onPlayLine = () => {}
+    // Same references (e, onPlayLine, twoLines, DEFAULT_SETTINGS) on both
+    // renders -- only activeChar differs -- so a genuinely unaffected line
+    // has every reason to bail out via React.memo.
+    const { rerender } = render(
+      <LyricView lines={twoLines} dict={dict} engine={e} settings={DEFAULT_SETTINGS}
+        activeLine={0} activeChar={0} onPlayLine={onPlayLine} />,
+    )
+    resetLyricLineRenderCount()
+
+    rerender(
+      <LyricView lines={twoLines} dict={dict} engine={e} settings={DEFAULT_SETTINGS}
+        activeLine={0} activeChar={1} onPlayLine={onPlayLine} />,
+    )
+
+    // activeChar moved from 0 to 1, still inside line 0 -- line 0 legitimately
+    // re-renders (its own activeCharInThisLine prop changed). Line 1's props
+    // are byte-for-byte identical, so it must be skipped: exactly 1 render,
+    // not 2. (Delete the React.memo wrap on LyricLine and this becomes 2.)
+    expect(lyricLineRenderCount).toBe(1)
   })
 })

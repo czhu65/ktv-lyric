@@ -16,6 +16,14 @@ export interface AudioEngine {
   load(s: Syllable): Promise<AudioBuffer | null>
   prefetch(ss: Syllable[]): Promise<void>
   play(s: Syllable, when?: number): number
+  /**
+   * Schedules already-loaded syllables back-to-back, in order, using the
+   * context's own clock (not wall-clock `await`s) so consecutive syllables
+   * never overlap. A syllable with no decoded buffer is skipped without
+   * throwing -- the rest of the sequence still plays in order. Load the
+   * syllables first (e.g. via `prefetch`); this does not load anything.
+   */
+  playSequence(ss: Syllable[]): void
 }
 
 export function createAudioEngine(
@@ -87,6 +95,20 @@ export function createAudioEngine(
       src.connect(ctx.destination)
       src.start(when ?? ctx.currentTime)
       return b.duration
+    },
+
+    playSequence(ss) {
+      let when = ctx.currentTime
+      for (const s of ss) {
+        const b = buffers.get(s)
+        if (!b) continue // no audio for this syllable -- skip, don't throw, don't advance the clock
+        touch(s, b)
+        const src = (ctx as AudioContext).createBufferSource()
+        src.buffer = b
+        src.connect(ctx.destination)
+        src.start(when)
+        when += b.duration
+      }
     },
   }
 }

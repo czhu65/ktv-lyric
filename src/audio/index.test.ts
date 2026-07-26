@@ -159,6 +159,49 @@ describe('AudioEngine', () => {
     })
   })
 
+  describe('playSequence', () => {
+    it('schedules two syllables at increasing times separated by the first clip\'s duration', async () => {
+      const ctx = fakeCtx()
+      const e = createAudioEngine(ctx as unknown as BaseAudioContext)
+      await e.unlock()
+      await e.load('coeng3')
+      await e.load('go1')
+
+      e.playSequence(['coeng3', 'go1'])
+
+      expect(ctx.createBufferSource).toHaveBeenCalledTimes(2)
+      const starts = ctx.createBufferSource.mock.results.map(
+        (r) => (r.value as { start: ReturnType<typeof vi.fn> }).start.mock.calls[0][0] as number,
+      )
+      expect(starts[1] - starts[0]).toBeCloseTo(0.42, 5) // duration() of the first clip, from fakeCtx
+    })
+
+    it('skips a syllable with no loaded audio, without throwing, and does not advance the clock for it', async () => {
+      const ctx = fakeCtx()
+      const e = createAudioEngine(ctx as unknown as BaseAudioContext)
+      await e.unlock()
+      await e.load('coeng3')
+      // 'go1' deliberately never loaded -- no decoded buffer for it.
+
+      expect(() => e.playSequence(['coeng3', 'go1'])).not.toThrow()
+      expect(ctx.createBufferSource).toHaveBeenCalledTimes(1)
+    })
+
+    it('a single syllable behaves as before: one clip scheduled at the current time', async () => {
+      const ctx = fakeCtx()
+      const e = createAudioEngine(ctx as unknown as BaseAudioContext)
+      await e.unlock()
+      await e.load('coeng3')
+
+      e.playSequence(['coeng3'])
+
+      expect(ctx.createBufferSource).toHaveBeenCalledTimes(1)
+      const start = (ctx.createBufferSource.mock.results[0].value as { start: ReturnType<typeof vi.fn> })
+        .start.mock.calls[0][0] as number
+      expect(start).toBeCloseTo(ctx.currentTime, 5)
+    })
+  })
+
   it('prefetch loads every distinct syllable, dedupes repeats, and tolerates ones with no audio', async () => {
     const ctx = fakeCtx()
     const e = createAudioEngine(ctx as unknown as BaseAudioContext)

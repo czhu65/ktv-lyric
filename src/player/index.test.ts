@@ -18,6 +18,7 @@ function harness() {
     load: vi.fn(async () => ({ duration: 0.4 }) as AudioBuffer),
     prefetch: vi.fn(async () => {}),
     play: (s: string, when = 0) => { played.push({ s, when }); return 0.4 },
+    playSequence: vi.fn(),
   }
 
   const player = createPlayer({
@@ -178,6 +179,7 @@ describe('player edge cases', () => {
         played.push({ s, when })
         return 0.4
       },
+      playSequence: vi.fn(),
     }
     const player = createPlayer({
       engine,
