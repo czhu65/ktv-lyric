@@ -1,0 +1,43 @@
+/* Word grouping is SPACING, not decoration — the lyric must still read as a
+   lyric. Grouping is derived from the dictionary keys, not from to-jyutping,
+   which exposes no segmentation API. */
+.lyric-line { line-height: 2.6; margin: 0 0 0.75rem; }
+.token { display: inline-block; margin-inline-end: 0.35em; }
+.token[data-word] { border-radius: 4px; }
+@media (hover: hover) { .token[data-word]:hover { background: rgba(127,127,127,0.12); } }
+
+.char {
+  all: unset;
+  cursor: pointer;
+  display: inline-block;
+  min-width: 44px;    /* touch target */
+  min-height: 44px;
+  text-align: center;
+  font-size: 1.5rem;
+}
+.char:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.char[data-active='true'] { background: rgba(255,200,0,0.35); border-radius: 4px; }
+.char[data-noaudio='true'] { text-decoration: underline dotted; text-underline-offset: 4px; }
+
+.play-line {
+  all: unset;
+  cursor: pointer;
+  opacity: 0.4;
+  padding: 0 0.5rem;
+  min-width: 44px; min-height: 44px;
+}
+.play-line:hover, .play-line:focus-visible { opacity: 1; }
+
+rt { font: inherit; font-size: 0.5em; opacity: 0.75; }
+.ruby-under rt { ruby-position: under; }
+.punct { opacity: 0.5; font-size: 1.5rem; }
+
+.gloss {
+  position: sticky; bottom: 0;
+  padding: 0.75rem 1rem;
+  background: Canvas; color: CanvasText;
+  border-top: 1px solid rgba(127,127,127,0.4);
+}
+.gloss-word { font-size: 1.25rem; }
+.gloss-rom { opacity: 0.7; font-size: 0.9rem; }
+.gloss-close { float: inline-end; all: unset; cursor: pointer; padding: 0 0.5rem; }
