@@ -13,6 +13,7 @@ import PasteBox from './ui/PasteBox'
 import Transport from './ui/Transport'
 import SettingsPanel from './ui/SettingsPanel'
 import LyricView from './ui/LyricView'
+import Credits from './ui/Credits'
 
 // Shared by onSearch and onPick: whichever path hits LRCLIB's rate limit,
 // the user sees the identical, delay-naming message rather than two
@@ -177,6 +178,7 @@ export default function App() {
           />
         </>
       )}
+      <Credits />
     </main>
   )
 }
