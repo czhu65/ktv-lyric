@@ -13,9 +13,32 @@ export class RateLimitError extends Error {
   }
 }
 
+// Retry-After is RFC 7231 §7.1.3: either delta-seconds ("120") or an
+// HTTP-date ("Fri, 31 Dec 1999 23:59:59 GMT"). `Number()` alone yields NaN
+// for the date form, so a compliant-but-date-flavored server would blow up
+// downstream retry-scheduling code. Try delta-seconds first, then an
+// HTTP-date converted to seconds-from-now, and only fall back to a fixed
+// default if neither produces a sane (finite, positive) value.
+function parseRetryAfterSec(value: string | null): number {
+  const FALLBACK_SEC = 30
+
+  if (value) {
+    const deltaSeconds = Number(value)
+    if (Number.isFinite(deltaSeconds) && deltaSeconds > 0) return deltaSeconds
+
+    const dateMs = Date.parse(value)
+    if (!Number.isNaN(dateMs)) {
+      const secondsFromNow = Math.round((dateMs - Date.now()) / 1000)
+      if (secondsFromNow > 0) return secondsFromNow
+    }
+  }
+
+  return FALLBACK_SEC
+}
+
 function guard(res: Response) {
   if (res.status === 429) {
-    throw new RateLimitError(Number(res.headers.get('Retry-After') ?? 30))
+    throw new RateLimitError(parseRetryAfterSec(res.headers.get('Retry-After')))
   }
 }
 
