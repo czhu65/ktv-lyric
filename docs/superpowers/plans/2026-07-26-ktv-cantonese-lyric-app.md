@@ -416,12 +416,18 @@ const cantoRows = parseAll(readFileSync('scripts/.cache/cccanto.txt', 'utf8'))
 const cedictRows = parseAll(await fetchText(CEDICT))
 console.log(`CC-Canto rows: ${cantoRows.length}  CC-CEDICT rows: ${cedictRows.length}`)
 
-// CC-Canto FIRST. The map below is first-write-wins, so load order is what gives
-// CC-Canto's Cantonese senses priority over CC-CEDICT's Mandarin ones. CC-CEDICT
-// glosses 諗 as "to reprimand" and 睇 as "to cast a sidelong glance", which are
-// wrong for Cantonese; CC-Canto has "to think" and "to look at".
+// CC-CEDICT FIRST. It is the better general dictionary, and with the extended
+// NOISE filter skipping surname/bound-form/abbreviation rows it yields the correct
+// primary sense for common characters. CC-Canto then fills only the keys CC-CEDICT
+// lacks — which is exactly where the Cantonese-only vocabulary lives (入面, 落嚟,
+// 我哋). The colloquial characters CC-CEDICT gets wrong for Cantonese (睇, 諗, 佢,
+// 嘅) are handled by overrides.json, applied last, which wins over both.
+//
+// Measured 2026-07-26: both orderings give identical glosses for every colloquial
+// test word, while CC-Canto-first degrades common ones (去 -> "passed away",
+// 中 -> "(dialect) OK"). See the spec's "Source ordering" section.
 const dict = {}
-for (const r of [...cantoRows, ...cedictRows]) {
+for (const r of [...cedictRows, ...cantoRows]) {
   if (r.trad.length > MAX_WORD) continue
   if (dict[r.trad]) continue
   const g = cleanGloss(r.glosses)
@@ -458,7 +464,7 @@ writeFileSync(
 Run: `node scripts/build-dict.mjs`
 Expected: prints entry count, raw bytes, gzip bytes; exits 0; `public/data/dict.json` exists.
 
-Measured on 2026-07-26 against the real sources: **77,122 entries, 981 KB gzip**. You should land close to this — CC-CEDICT updates frequently, so a drift of a few percent is normal. **Record the actual figures in the commit message.** If you are off by more than ~10%, stop and report it rather than adjusting the budget.
+Measured on 2026-07-26 against the real sources: **76,964 entries, 983,920 B gzip (~961 KB)**. You should land close to this — CC-CEDICT updates frequently, so a drift of a few percent is normal. **Record the actual figures in the commit message.** If you are off by more than ~10%, stop and report it rather than adjusting the budget.
 
 - [ ] **Step 8: Commit**
 

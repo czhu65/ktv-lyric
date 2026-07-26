@@ -329,8 +329,9 @@ directly above the character**, which is the property that matters for study.
 **Source: CC-CEDICT + CC-Canto, merged at build time. Both, not either.**
 **Packaging: one plain, eagerly-loaded, gzipped JSON. No sharding, no IndexedDB, no WASM.**
 
-**Cap headwords at 2 characters** and cap each gloss at ~40 characters. CC-Canto rows are loaded
-**first** so their Cantonese senses win over CC-CEDICT's Mandarin ones on a key collision.
+**Cap headwords at 2 characters** and cap each gloss at ~40 characters. **CC-CEDICT is loaded first**;
+CC-Canto fills only the keys CC-CEDICT lacks; a hand-curated override list is applied last and wins
+over both. See "Source ordering" below — the obvious choice turned out to be the wrong one.
 
 | Strategy | entries | gzip | grouping quality |
 |---|---|---|---|
@@ -364,6 +365,37 @@ component characters still gloss, so nothing is left undefined, but the idiom bo
 compounds like 時間, 流逝, 記憶, 片段 and 眼淚 as loose single characters. It bought visibly worse
 grouping than the option costing twice as much.
 
+### Source ordering — measured, and the reverse of the intuitive choice
+
+This spec originally specified **CC-Canto first**, reasoning that its Cantonese senses should beat
+CC-CEDICT's Mandarin ones (CC-CEDICT glosses 睇 as "to cast a sidelong glance"). Measurement showed
+that ordering is worse overall, and the reasoning was already obsolete: every colloquial character it
+was meant to rescue is in `overrides.json`, which is applied last and wins regardless.
+
+Measured across the 45 most frequent Chinese characters, both orderings produce **identical** glosses
+for every colloquial test word (佢, 嘅, 冇, 睇, 我哋, 入面, 落嚟, 時間, 愛情) — but CC-Canto-first
+degrades common characters badly: 去 → "passed away", 中 → "(dialect) OK", 上 → "8. to climb",
+會 → "(noun) 1. seminar; 2. meeting; 3.".
+
+**The root cause was not ordering.** Both sources list unhelpful senses first for common characters,
+so taking the first slash-segment of the first matching row yields garbage either way. CC-CEDICT-first
+alone produced 也 → "surname Ye", 時 → "surname Shi", 以 → "abbr. for Israel". The fix is a
+**fall-through filter**: rows whose leading sense matches `^surname `, `^used in `, `^abbr. for `,
+`^variant of `, `^see `, `^CL:` or exactly `(bound form)` yield no gloss, so the *next* row for that
+headword supplies one. With that filter, CC-CEDICT-first is correct on all 45 probed characters and
+is 12 KB smaller. Final: **76,964 entries, 961 KB gzip.**
+
+Two further data traps, both found by review rather than by design:
+
+- **CC-Canto's line format has a trailing-comment variant.** 8,882 of its 34,347 lines (25.9%) end
+  with `# adapted from cc-cedict` after the closing `/`. A parser anchored to end-of-line after the
+  gloss drops all of them, and 4,349 single characters then silently fall back to CC-CEDICT's Mandarin
+  sense — the exact failure the ordering was meant to prevent.
+- **CC-Canto packs numbered senses into one segment**, so naive truncation yields fragments like
+  `(noun) 1. seminar; 2. meeting; 3.`. Keep the part-of-speech tag and the first sense only. The
+  enumerator must be matched as `\d+\.` **followed by whitespace** — otherwise `2.5 times more`
+  becomes `5 times more`, silently changing meaning.
+
 ### Neither source works alone
 
 CC-CEDICT contains every colloquial headword but with Mandarin senses that are actively wrong for
@@ -379,8 +411,8 @@ the highest quality-per-byte item in the entire app.
 ### Build step
 
 1. Fetch `cedict_1_0_ts_utf-8_mdbg.txt.gz` and `cccanto-170202.zip`; parse the shared
-   `TRAD SIMP [pinyin] {jyutping}? /gloss/` format. Load **CC-Canto first** — with a
-   first-write-wins map, load order is what gives its Cantonese senses priority.
+   `TRAD SIMP [pinyin] {jyutping}? /gloss/` format, **accepting an optional trailing `#` comment**.
+   Load **CC-CEDICT first**; CC-Canto then fills only the keys it lacks.
 2. **Do not collapse CC-Canto rows onto CC-CEDICT headwords.** Merge only on
    `(trad, simp, normalized-pinyin)` *and* absent jyutping; otherwise append as a separate entry.
    Matching on `(trad, simp)` alone resolves only 4 of 2,456 collisions (0.2%).
