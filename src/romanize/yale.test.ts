@@ -30,3 +30,34 @@ describe('toYale', () => {
     expect(toYale('abc')).toBe('abc')
   })
 })
+
+describe('toYale syllabic nasals', () => {
+  it('marks the six tones on m', () => {
+    expect(toYale('m1')).toBe('m̄')
+    expect(toYale('m2')).toBe('ḿ')
+    expect(toYale('m3')).toBe('m')
+    expect(toYale('m4')).toBe('m̀h')
+    expect(toYale('m5')).toBe('ḿh')
+    expect(toYale('m6')).toBe('mh')
+  })
+
+  it('marks the six tones on ng', () => {
+    expect(toYale('ng1')).toBe('n̄g')
+    expect(toYale('ng2')).toBe('ńg')
+    expect(toYale('ng3')).toBe('ng')
+    expect(toYale('ng4')).toBe('ǹgh')
+    expect(toYale('ng5')).toBe('ńgh')
+    expect(toYale('ng6')).toBe('ngh')
+  })
+
+  it('keeps the leading h on the interjection form', () => {
+    expect(toYale('hm1')).toBe('hm̄')
+  })
+
+  it('never leaves a tone digit in the output for any syllabic nasal', () => {
+    const nasalSyllables = ['ng5', 'ng4', 'ng6', 'm2', 'm4', 'hm1']
+    for (const syllable of nasalSyllables) {
+      expect(toYale(syllable)).not.toMatch(/[0-9]/)
+    }
+  })
+})

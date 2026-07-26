@@ -10,6 +10,22 @@ const DIACRITIC: Record<string, Record<string, string>> = {
   u: { 1: 'ū', 2: 'ú', 4: 'ù', 5: 'ú' },
 }
 
+// Syllabic nasals (m, ng, and their h-prefixed interjection forms hm, hng)
+// have no vowel, so SYLLABLE above never matches them -- e.g. 唔 (m4), the
+// Cantonese negation particle, would otherwise render with a leaking tone
+// digit. They get their own regex and diacritic table, with the diacritic
+// placed on the first letter of the nasal itself (n in "ng", m in "m").
+const NASAL_SYLLABLE = /^(h?)(m|ng)([1-6])$/
+
+const NASAL_DIACRITIC: Record<string, string> = {
+  1: String.fromCodePoint(0x0304), // combining macron
+  2: String.fromCodePoint(0x0301), // combining acute
+  3: '',
+  4: String.fromCodePoint(0x0300), // combining grave
+  5: String.fromCodePoint(0x0301), // combining acute
+  6: '',
+}
+
 function mapInitial(i: string): string {
   if (i === 'z') return 'j'
   if (i === 'c') return 'ch'
@@ -23,7 +39,14 @@ function mapFinal(f: string): string {
 
 export function toYale(jyutping: string): string {
   const m = SYLLABLE.exec(jyutping)
-  if (!m) return jyutping
+  if (!m) {
+    const nasal = NASAL_SYLLABLE.exec(jyutping)
+    if (!nasal) return jyutping
+    const [, h, nucleus, tone] = nasal
+    const diacritic = NASAL_DIACRITIC[tone]
+    const trailingH = tone === '4' || tone === '5' || tone === '6' ? 'h' : ''
+    return h + nucleus[0] + diacritic + nucleus.slice(1) + trailingH
+  }
   const [, rawInitial, rawFinal, coda = '', tone] = m
 
   let initial = mapInitial(rawInitial)
