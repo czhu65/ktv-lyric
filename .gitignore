@@ -1,0 +1,10 @@
+node_modules
+dist
+.superpowers/
+
+# Editor / OS
+.DS_Store
+*.local
+
+# Logs
+npm-debug.log*
