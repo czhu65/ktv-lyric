@@ -5,16 +5,25 @@ const LRU_MAX = 600 // ~600 clips of ~0.4s ≈ 10 MB decoded. A single sprite
 
 export interface AudioEngine {
   unlock(): Promise<void>
+  /** Always false until `unlock()` has resolved (the manifest isn't loaded yet) — await `unlock()` first. */
   has(s: Syllable): boolean
-  /** Decoded clip length in seconds, or 0 if not loaded. Does not play. */
+  /**
+   * Decoded clip length in seconds, or 0 if not loaded. Does not play.
+   * Requires `unlock()` to have resolved before the syllable is loaded —
+   * await `unlock()` first.
+   */
   duration(s: Syllable): number
   load(s: Syllable): Promise<AudioBuffer | null>
   prefetch(ss: Syllable[]): Promise<void>
   play(s: Syllable, when?: number): number
 }
 
-export function createAudioEngine(ctx: BaseAudioContext): AudioEngine {
+export function createAudioEngine(
+  ctx: BaseAudioContext,
+  opts: { lruMax?: number } = {},
+): AudioEngine {
   const base = import.meta.env.BASE_URL
+  const lruMax = opts.lruMax ?? LRU_MAX
   const buffers = new Map<Syllable, AudioBuffer>()
   const inflight = new Map<Syllable, Promise<AudioBuffer | null>>()
   let available: Set<Syllable> | null = null
@@ -22,7 +31,7 @@ export function createAudioEngine(ctx: BaseAudioContext): AudioEngine {
   function touch(s: Syllable, b: AudioBuffer) {
     buffers.delete(s)
     buffers.set(s, b)
-    while (buffers.size > LRU_MAX) buffers.delete(buffers.keys().next().value as Syllable)
+    while (buffers.size > lruMax) buffers.delete(buffers.keys().next().value as Syllable)
   }
 
   return {
@@ -41,7 +50,10 @@ export function createAudioEngine(ctx: BaseAudioContext): AudioEngine {
 
     load(s) {
       const cached = buffers.get(s)
-      if (cached) return Promise.resolve(cached)
+      if (cached) {
+        touch(s, cached) // refresh recency on a cache hit, not just on decode
+        return Promise.resolve(cached)
+      }
       if (available && !available.has(s)) return Promise.resolve(null)
 
       let p = inflight.get(s)
@@ -69,6 +81,7 @@ export function createAudioEngine(ctx: BaseAudioContext): AudioEngine {
     play(s, when) {
       const b = buffers.get(s)
       if (!b) return 0
+      touch(s, b) // playing counts as a use for recency purposes
       const src = (ctx as AudioContext).createBufferSource()
       src.buffer = b
       src.connect(ctx.destination)

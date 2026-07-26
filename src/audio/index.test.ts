@@ -72,4 +72,107 @@ describe('AudioEngine', () => {
     await e.unlock()
     expect(e.duration('go1')).toBe(0)
   })
+
+  it('fetches the manifest from the exact BASE_URL-relative path', async () => {
+    const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
+    await e.unlock()
+    expect(fetch).toHaveBeenCalledWith('/ktv-lyric/data/syllables.json')
+  })
+
+  it('fetches a clip from the exact BASE_URL-relative path', async () => {
+    const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
+    await e.unlock()
+    await e.load('coeng3')
+    expect(fetch).toHaveBeenCalledWith('/ktv-lyric/audio/syl/coeng3.mp3')
+  })
+
+  describe('LRU eviction', () => {
+    // These don't call unlock(), so `available` stays null and load() skips
+    // the manifest gate — every syllable name is treated as loadable. That
+    // isolates the cache mechanics under test from the (unrelated) manifest
+    // gate, and lets the fake syllable names be arbitrary.
+
+    it('evicts once the bound is exceeded, and the cache never holds more than the bound', async () => {
+      const ctx = fakeCtx()
+      const e = createAudioEngine(ctx as unknown as BaseAudioContext, { lruMax: 3 })
+      await e.load('s1')
+      await e.load('s2')
+      await e.load('s3')
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(3)
+
+      await e.load('s4') // exceeds the bound by one -> evicts the oldest, s1
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(4)
+
+      // s2, s3, s4 must still be the exact 3 entries retained (a bound that
+      // was exceeded, or eviction that removed the wrong entries, would show
+      // up here as an unexpected re-decode). Checked before touching s1
+      // again, since a cache hit itself refreshes recency and would
+      // otherwise perturb this read-only check.
+      await e.load('s2')
+      await e.load('s3')
+      await e.load('s4')
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(4)
+
+      await e.load('s1') // evicted -> must re-fetch and re-decode
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(5)
+    })
+
+    it('a syllable used via load() since insertion survives an eviction that removes an older, unused one', async () => {
+      const ctx = fakeCtx()
+      const e = createAudioEngine(ctx as unknown as BaseAudioContext, { lruMax: 3 })
+      await e.load('s1')
+      await e.load('s2')
+      await e.load('s3')
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(3)
+
+      await e.load('s1') // cache hit -> must refresh s1's recency
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(3) // still a hit, no re-decode
+
+      await e.load('s4') // forces one eviction: s2 is now the oldest untouched entry
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(4)
+
+      await e.load('s1') // recently used -> must survive
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(4)
+
+      await e.load('s2') // never re-used -> must have been evicted instead
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(5)
+    })
+
+    it('play() counts as a use for recency purposes', async () => {
+      const ctx = fakeCtx()
+      const e = createAudioEngine(ctx as unknown as BaseAudioContext, { lruMax: 3 })
+      await e.load('s1')
+      await e.load('s2')
+      await e.load('s3')
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(3)
+
+      e.play('s1', 0) // must refresh s1's recency without re-decoding
+
+      await e.load('s4') // forces one eviction: s2 is now the oldest untouched entry
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(4)
+
+      await e.load('s1') // played recently -> must survive
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(4)
+
+      await e.load('s2') // never touched -> must have been evicted instead
+      expect(ctx.decodeAudioData).toHaveBeenCalledTimes(5)
+    })
+  })
+
+  it('prefetch loads every distinct syllable, dedupes repeats, and tolerates ones with no audio', async () => {
+    const ctx = fakeCtx()
+    const e = createAudioEngine(ctx as unknown as BaseAudioContext)
+    await e.unlock()
+
+    await expect(
+      e.prefetch(['coeng3', 'go1', 'coeng3', 'zzz9']),
+    ).resolves.toBeUndefined()
+
+    // coeng3 + go1 decoded once each; the repeated coeng3 is deduped within
+    // the call, and zzz9 (absent from the manifest) never hits the network.
+    expect(ctx.decodeAudioData).toHaveBeenCalledTimes(2)
+    expect(e.duration('coeng3')).toBeCloseTo(0.42)
+    expect(e.duration('go1')).toBeCloseTo(0.42)
+    expect(await e.load('zzz9')).toBeNull()
+  })
 })
