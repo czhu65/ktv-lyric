@@ -1849,11 +1849,15 @@ function harness() {
   return { player, played, advance }
 }
 
+// start() awaits unlock() then prefetch(), so a single `await flush()`
+// does NOT reliably get past both. Drain the whole microtask queue instead.
+const flush = () => new Promise((r) => setTimeout(r, 0))
+
 describe('player', () => {
   it('schedules every syllable of a line in order', async () => {
     const { player, played, advance } = harness()
     player.playLine(line(['ngo5'], ['dei6']))
-    await Promise.resolve()
+    await flush()
     advance(1)
     expect(played.map((p) => p.s)).toEqual(['ngo5', 'dei6'])
   })
@@ -1861,7 +1865,7 @@ describe('player', () => {
   it('spaces syllables by clip duration plus the in-line gap', async () => {
     const { player, played, advance } = harness()
     player.playLine(line(['ngo5'], ['dei6']))
-    await Promise.resolve()
+    await flush()
     advance(1)
     expect(played[1].when - played[0].when).toBeCloseTo(0.4 + 0.12, 5)
   })
@@ -1870,7 +1874,7 @@ describe('player', () => {
     const { player, played, advance } = harness()
     player.setInterLineGap(1.0)
     player.playAll([line(['ngo5']), line(['dei6'])])
-    await Promise.resolve()
+    await flush()
     advance(5)
     expect(played[1].when - played[0].when).toBeCloseTo(0.4 + 1.0, 5)
   })
@@ -1878,7 +1882,7 @@ describe('player', () => {
   it('plays every syllable of a multi-syllable character', async () => {
     const { player, played, advance } = harness()
     player.playLine({ tokens: [{ chars: [{ char: '瓩', syllables: ['cin1', 'ngaa5'] }] }] })
-    await Promise.resolve()
+    await flush()
     advance(1)
     expect(played.map((p) => p.s)).toEqual(['cin1', 'ngaa5'])
   })
@@ -1888,7 +1892,7 @@ describe('player', () => {
     player.playLine({
       tokens: [{ chars: [{ char: '唱', syllables: ['coeng3'] }, { char: '，', syllables: [] }] }],
     })
-    await Promise.resolve()
+    await flush()
     advance(1)
     expect(played).toHaveLength(1)
   })
@@ -1896,7 +1900,7 @@ describe('player', () => {
   it('stop() halts further scheduling and reports not playing', async () => {
     const { player, played, advance } = harness()
     player.playAll([line(['a1']), line(['b1']), line(['c1'])])
-    await Promise.resolve()
+    await flush()
     player.stop()
     advance(10)
     expect(played.length).toBeLessThan(3)
@@ -1910,7 +1914,7 @@ describe('player', () => {
     const seen: number[] = []
     player.subscribe((s) => seen.push(s.lineIndex))
     player.playAll([line(['a1']), line(['b1'])])
-    await Promise.resolve()
+    await flush()
     advance(5)
     expect(seen).toContain(1)
   })
@@ -2238,7 +2242,7 @@ const lines = [{
 const dict = createDict({ '唱歌': 'to sing a song' })
 
 const engine = () => ({
-  unlock: vi.fn(async () => {}), has: () => true,
+  unlock: vi.fn(async () => {}), has: (_s: string) => true, duration: () => 0.4,
   load: vi.fn(async () => null), prefetch: vi.fn(async () => {}), play: vi.fn(() => 0.4),
 })
 
