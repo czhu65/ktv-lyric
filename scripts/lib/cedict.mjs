@@ -31,8 +31,11 @@ export function cleanGloss(glosses, max = 40) {
   // CC-Canto packs numbered senses into one segment:
   //   "(noun) 1. seminar; 2. meeting; 3."
   // Keep the part-of-speech tag, then the FIRST sense only.
-  const m = /^(\([^)]*\)\s*)?\d+\.\s*(.+)$/.exec(out)
-  if (m) out = (m[1] ?? '') + m[2].split(/\s*\d+\.\s*/)[0]
+  // A real sense enumerator is always followed by whitespace ("1. seminar");
+  // a decimal point never is ("2.5 times"). Require \s+ after the period so
+  // decimals aren't mistaken for enumerators and silently mangled.
+  const m = /^(\([^)]*\)\s*)?(\d+)\.\s+(.+)$/.exec(out)
+  if (m) out = (m[1] ?? '') + m[3].split(/\s*\d+\.\s+/)[0]
   out = out.replace(/[;,]\s*$/, '').trim()
   if (out.length > max) {
     const cut = out.slice(0, max)

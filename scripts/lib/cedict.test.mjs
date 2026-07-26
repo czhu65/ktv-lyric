@@ -67,8 +67,23 @@ describe('cleanGloss', () => {
     expect(cleanGloss(['surname Wong'])).toBeNull()
   })
 
-  it('drops a bound-form cross-reference row', () => {
+  it("drops a 'used in' cross-reference row", () => {
+    // This input exercises the `^used in ` NOISE pattern, not
+    // `/^\(bound form\)$/` — despite the old test title's claim. See the
+    // two tests below for actual `(bound form)` coverage.
     expect(cleanGloss(['used in 上聲|上声[shang3 sheng1]'])).toBeNull()
+  })
+
+  it('drops an exact "(bound form)" marker row', () => {
+    expect(cleanGloss(['(bound form)'])).toBeNull()
+  })
+
+  it('keeps a "(bound form)" tag when a real gloss follows it', () => {
+    // NOISE's /^\(bound form\)$/ is anchored to an exact whole-string match
+    // by design (359 live entries have "(bound form)" as a prefix followed
+    // by a real gloss), so a prefixed row like this must survive with the
+    // tag intact rather than being dropped.
+    expect(cleanGloss(['(bound form) up; upper; above'])).toBe('(bound form) up; upper; above')
   })
 
   it('drops an abbreviation row', () => {
@@ -90,5 +105,16 @@ describe('cleanGloss', () => {
     const out = cleanGloss(long)
     expect(out.length).toBeLessThanOrEqual(40)
     expect(out).not.toMatch(/[;,(]\s*$/)
+  })
+
+  it('does not mistake a decimal number for a sense enumerator', () => {
+    // A real sense enumerator ("1.", "2.") is always followed by whitespace;
+    // a decimal point never is. Without that distinction, the enumerator
+    // regex swallows the "2." in "2.5" as a fake sense marker.
+    expect(cleanGloss(['2.5 times more'])).toBe('2.5 times more')
+  })
+
+  it('keeps a decimal number intact after a leading part-of-speech tag', () => {
+    expect(cleanGloss(['(rate) 3.5 percent increase'])).toBe('(rate) 3.5 percent increase')
   })
 })
