@@ -2742,9 +2742,14 @@ export default function App() {
     const out: Line[] = []
     for (const l of raw) {
       // Never feed Simplified to to-jyutping — it fails silently on mergers.
-      // toTraditional is idempotent on Traditional input, so no detection step
-      // is needed here; isSimplified exists for the search fan-out.
-      const text = await toTraditional(normalize(l.text))
+      // toTraditional is NOT idempotent on Traditional input — it still
+      // normalises glyph variants (e.g. it can rewrite a word's characters
+      // to a different, equally-Traditional spelling), so Traditional
+      // lyrics must pass through untouched rather than being run through
+      // conversion. Detect first, and only convert text that is actually
+      // Simplified.
+      let text = normalize(l.text)
+      if (await isSimplified(text)) text = await toTraditional(text)
       // Annotate the WHOLE line. A break inside a word changes the reading.
       out.push({
         tokens: annotateLine(text, { words: dict.keys(), maxWordLength: dict.maxKeyLength }),
