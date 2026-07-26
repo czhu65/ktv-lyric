@@ -9,3 +9,6 @@ dist
 # Logs
 npm-debug.log*
 coverage
+
+# Downloaded dictionary sources (see scripts/build-dict.mjs)
+scripts/.cache/
