@@ -36,6 +36,59 @@ describe('AudioEngine', () => {
     expect(e.has('zzz9')).toBe(false)
   })
 
+  // --- Finding 2: has() must not report false merely because the manifest
+  // hasn't loaded yet -- "unknown" must read as available, not absent. ---
+
+  it('has() reports true for everything before the manifest has loaded', () => {
+    const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
+    // No unlock()/preloadManifest() call -- the manifest is still null.
+    expect(e.has('coeng3')).toBe(true)
+    expect(e.has('anything-at-all')).toBe(true)
+  })
+
+  it('has() settles to the real manifest membership once it resolves', async () => {
+    const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
+    expect(e.has('zzz9')).toBe(true) // unknown -- assumed available
+    await e.unlock()
+    expect(e.has('zzz9')).toBe(false) // now known -- genuinely absent
+    expect(e.has('coeng3')).toBe(true) // now known -- genuinely present
+  })
+
+  it('preloadManifest() loads the manifest without touching AudioContext.resume()', async () => {
+    const ctx = fakeCtx()
+    const e = createAudioEngine(ctx as unknown as BaseAudioContext)
+    await e.preloadManifest()
+    expect(ctx.resume).not.toHaveBeenCalled()
+    expect(e.has('coeng3')).toBe(true)
+    expect(e.has('zzz9')).toBe(false)
+  })
+
+  // --- Finding 3: a manifest fetch that 404s (or similar) must be treated
+  // as a failure -- not silently `.json()`-parsed into garbage -- and must
+  // not be memoised, so a later retry can still succeed. Mirrors
+  // src/dict/index.ts's loadDict() handling of the identical failure mode. ---
+
+  it('unlock() rejects when the manifest fetch is not ok, instead of silently parsing an error body', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>not found</html>', { status: 404 })))
+    const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
+    await expect(e.unlock()).rejects.toThrow(/404/)
+  })
+
+  it('retries after a failed manifest load, succeeding on the second call', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response('', { status: 404 }))
+        .mockImplementationOnce(async () => new Response(JSON.stringify(['coeng3', 'go1']))),
+    )
+    const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
+
+    await expect(e.unlock()).rejects.toThrow()
+    await e.unlock()
+    expect(e.has('coeng3')).toBe(true)
+  })
+
   it('fetches and decodes a syllable once, then caches it', async () => {
     const ctx = fakeCtx()
     const e = createAudioEngine(ctx as unknown as BaseAudioContext)

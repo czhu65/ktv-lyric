@@ -5,7 +5,20 @@ const LRU_MAX = 600 // ~600 clips of ~0.4s ≈ 10 MB decoded. A single sprite
 
 export interface AudioEngine {
   unlock(): Promise<void>
-  /** Always false until `unlock()` has resolved (the manifest isn't loaded yet) — await `unlock()` first. */
+  /**
+   * Fetches the syllable manifest only -- no `AudioContext.resume()`, so
+   * this is safe to call before any user gesture (e.g. at mount) to let
+   * `has()` settle to real answers before the first tap or play. `unlock()`
+   * also does this as part of unlocking, so calling both is harmless: the
+   * fetch is shared/memoised either way.
+   */
+  preloadManifest(): Promise<void>
+  /**
+   * True once the manifest lists this syllable, OR the manifest has not
+   * resolved yet. Unknown is treated as available, not absent -- rendering
+   * before the manifest loads must not mark every character "no audio";
+   * see Finding 2. Once the manifest arrives, this reflects real membership.
+   */
   has(s: Syllable): boolean
   /**
    * Decoded clip length in seconds, or 0 if not loaded. Does not play.
@@ -34,7 +47,10 @@ export function createAudioEngine(
   const lruMax = opts.lruMax ?? LRU_MAX
   const buffers = new Map<Syllable, AudioBuffer>()
   const inflight = new Map<Syllable, Promise<AudioBuffer | null>>()
+  // null = "not yet known" (manifest hasn't loaded). Deliberately distinct
+  // from an empty Set, which would mean "known, and nothing is available".
   let available: Set<Syllable> | null = null
+  let manifestPromise: Promise<void> | null = null
 
   function touch(s: Syllable, b: AudioBuffer) {
     buffers.delete(s)
@@ -42,17 +58,36 @@ export function createAudioEngine(
     while (buffers.size > lruMax) buffers.delete(buffers.keys().next().value as Syllable)
   }
 
+  // Shared/memoised across concurrent callers, and NOT memoised on failure
+  // (mirrors src/dict/index.ts) so a transient network blip doesn't
+  // permanently strand has()/duration() on "assume everything is available".
+  function loadManifest(): Promise<void> {
+    manifestPromise ??= fetch(`${base}data/syllables.json`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`syllables.json -> HTTP ${r.status}`)
+        return r.json() as Promise<Syllable[]>
+      })
+      .then((list) => { available = new Set(list) })
+      .catch((err) => {
+        manifestPromise = null
+        throw err
+      })
+    return manifestPromise
+  }
+
   return {
     async unlock() {
       // AudioContext starts suspended on Chrome DESKTOP too, not just mobile.
       const c = ctx as unknown as AudioContext
       if (c.state === 'suspended' && typeof c.resume === 'function') await c.resume()
-      available ??= new Set<Syllable>(
-        await fetch(`${base}data/syllables.json`).then((r) => r.json()),
-      )
+      await loadManifest()
     },
 
-    has: (s) => available?.has(s) ?? false,
+    preloadManifest: loadManifest,
+
+    // Unknown (manifest not yet loaded) reads as available, not absent --
+    // see the `has` doc comment on the AudioEngine interface above.
+    has: (s) => available === null || available.has(s),
 
     duration: (s) => buffers.get(s)?.duration ?? 0,
 
