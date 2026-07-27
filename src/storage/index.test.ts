@@ -2,9 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import {
   loadSettings, saveSettings, SETTINGS_KEY, DEFAULT_SETTINGS,
-  cacheSong, getCachedSong, getCachedSongByTitleArtist,
+  cacheLyric, getCachedLyric, getCachedLyricByTitleArtist,
 } from './index'
-import type { Song } from '../types'
 
 describe('settings', () => {
   beforeEach(() => localStorage.clear())
@@ -76,62 +75,39 @@ describe('romanization settings migration', () => {
 // jsdom (the vitest environment for this project) does not implement
 // IndexedDB, so we polyfill it with fake-indexeddb for these tests. A fresh
 // IDBFactory is installed before each test so writes from one test can never
-// leak into the next.
-describe('song cache', () => {
+// leak into the next. A fresh factory also means each test opens a brand new
+// 'ktv-lyric-v2' database, so there is no state to explicitly tear down.
+describe('lyric cache', () => {
   beforeEach(() => {
     globalThis.indexedDB = new IDBFactory()
   })
 
-  const song: Song = {
-    title: 'Test Title',
-    artist: 'Test Artist',
-    lines: [{ tokens: [{ chars: [{ char: '我', syllables: ['ngo5'] }] }], timeMs: 1000 }],
-    source: 'lrclib',
-    lrclibId: 42,
-  }
-
-  it('round-trips a cached song', async () => {
-    await cacheSong(song)
-    expect(await getCachedSong(42)).toEqual(song)
-  })
-
-  it('is a no-op for a song with no lrclibId', async () => {
-    const noId: Song = { ...song, lrclibId: undefined }
-    await expect(cacheSong(noId)).resolves.toBeUndefined()
-    // Nothing was written under any key we can check — the DB should still
-    // be empty for the id the song otherwise would have used.
-    expect(await getCachedSong(42)).toBeNull()
-  })
-
-  it('returns null for a key that was never written', async () => {
-    expect(await getCachedSong(999)).toBeNull()
-  })
-
-  it('overwrites on a second write to the same key', async () => {
-    await cacheSong(song)
-    const updated: Song = { ...song, title: 'Updated Title' }
-    await cacheSong(updated)
-    expect(await getCachedSong(42)).toEqual(updated)
-  })
-
-  // --- Finding 4: a picked SongCandidate never carries lrclibId (only
-  // title/artist), so a repeat pick needs a way to find the cached song
-  // WITHOUT already knowing its id -- that's what this index is for. ---
-
-  describe('getCachedSongByTitleArtist', () => {
-    it('finds a cached song by title and artist, without needing its lrclibId', async () => {
-      await cacheSong(song)
-      expect(await getCachedSongByTitleArtist(song.title, song.artist)).toEqual(song)
+  it('round-trips a record by id', async () => {
+    await cacheLyric({
+      lrclibId: 1, title: '天空', artist: '歌手',
+      raw: [{ text: '天空', timeMs: 0 }], langGuess: 'yue',
     })
+    const got = await getCachedLyric(1)
+    expect(got?.raw).toEqual([{ text: '天空', timeMs: 0 }])
+    expect(got?.langGuess).toBe('yue')
+  })
 
-    it('returns null when no cached song matches the title/artist pair', async () => {
-      await cacheSong(song)
-      expect(await getCachedSongByTitleArtist('Nope', 'Nobody')).toBeNull()
-      expect(await getCachedSongByTitleArtist(song.title, 'Wrong Artist')).toBeNull()
-    })
+  it('round-trips by title and artist', async () => {
+    await cacheLyric({ lrclibId: 2, title: '天空', artist: '歌手', raw: [{ text: '天空' }] })
+    const got = await getCachedLyricByTitleArtist('天空', '歌手')
+    expect(got?.lrclibId).toBe(2)
+  })
 
-    it('returns null against an empty cache', async () => {
-      expect(await getCachedSongByTitleArtist(song.title, song.artist)).toBeNull()
-    })
+  it('stores raw text only, never annotations', async () => {
+    await cacheLyric({ lrclibId: 3, title: '你好', artist: '歌手', raw: [{ text: '你好' }] })
+    const got = await getCachedLyric(3)
+    // The whole point: nothing language-specific is persisted, so the same
+    // record serves both packs and toggling needs no second entry.
+    expect(JSON.stringify(got)).not.toContain('syllables')
+    expect(JSON.stringify(got)).not.toContain('tokens')
+  })
+
+  it('returns null for an unknown id', async () => {
+    expect(await getCachedLyric(9999)).toBeNull()
   })
 })

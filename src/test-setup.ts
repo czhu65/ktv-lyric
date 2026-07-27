@@ -3,11 +3,11 @@ import { beforeEach } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 
 // jsdom implements no IndexedDB at all, and (since Finding 4) App.tsx now
-// reads it unconditionally on every pick via getCachedSongByTitleArtist --
+// reads it unconditionally on every pick via getCachedLyricByTitleArtist --
 // so every test that can render <App /> or exercise storage/index.ts needs
 // SOMETHING under this name, not just the handful of tests that used to
 // polyfill it themselves. A fresh IDBFactory before each test keeps one
-// test's cached-song writes from leaking into an unrelated test.
+// test's cached-lyric writes from leaking into an unrelated test.
 beforeEach(() => {
   globalThis.indexedDB = new IDBFactory()
 })

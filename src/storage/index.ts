@@ -1,10 +1,20 @@
-import type { Song } from '../types'
+import type { SourceLine } from '../lyrics/parse'
+import type { LangId } from '../types'
 
 // Every key is namespaced: all of username.github.io/* shares ONE browser
 // origin, so a bare `settings` key would collide with other Pages projects.
 export const SETTINGS_KEY = 'ktvlyric:settings'
-const DB_NAME = 'ktv-lyric-v1'
-const STORE = 'songs'
+
+// v2: the store now holds RAW lyric lines instead of an annotated Song.
+// Annotation depends on the active language pack, so caching it would make
+// every cached syllable wrong the moment the user flips the toggle. Raw text
+// is language-independent, smaller, and makes toggling a pure recompute.
+//
+// The name is bumped rather than the version because the contents are
+// incompatible and this is PURELY a cache -- there is nothing to migrate, and
+// a fresh database is cheaper and less error-prone than an upgrade path.
+const DB_NAME = 'ktv-lyric-v2'
+const STORE = 'lyrics'
 
 export type Theme = 'system' | 'light' | 'dark'
 
@@ -92,7 +102,7 @@ export function saveSettings(s: Settings): void {
 // Kept as its own index (not the primary key) so a song can be looked up by
 // title+artist -- the only thing known about a SongCandidate BEFORE the
 // LRCLIB fetch that would otherwise be needed to learn its id. That is what
-// lets a repeat pick skip the network entirely (see getCachedSongByTitleArtist).
+// lets a repeat pick skip the network entirely (see getCachedLyricByTitleArtist).
 const TITLE_ARTIST_INDEX = 'byTitleArtist'
 
 function db(): Promise<IDBDatabase> {
@@ -107,36 +117,49 @@ function db(): Promise<IDBDatabase> {
   })
 }
 
-export async function cacheSong(song: Song): Promise<void> {
-  if (!song.lrclibId) return
+export interface CachedLyric {
+  lrclibId: number
+  title: string
+  artist: string
+  /** Exactly what fetchLyrics() returned. Never annotated. */
+  raw: SourceLine[]
+  /** Carried through so a cache hit still seeds the language toggle without
+   *  a second search. */
+  langGuess?: LangId
+}
+
+export async function cacheLyric(rec: CachedLyric): Promise<void> {
+  if (!rec.lrclibId) return
   const d = await db()
   await new Promise<void>((resolve, reject) => {
     const tx = d.transaction(STORE, 'readwrite')
-    tx.objectStore(STORE).put(song)
+    tx.objectStore(STORE).put(rec)
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
 }
 
-export async function getCachedSong(id: number): Promise<Song | null> {
+export async function getCachedLyric(id: number): Promise<CachedLyric | null> {
   const d = await db()
   return new Promise((resolve, reject) => {
     const req = d.transaction(STORE, 'readonly').objectStore(STORE).get(id)
-    req.onsuccess = () => resolve((req.result as Song) ?? null)
+    req.onsuccess = () => resolve((req.result as CachedLyric) ?? null)
     req.onerror = () => reject(req.error)
   })
 }
 
 // Looked up by title+artist rather than lrclibId -- a picked SongCandidate
 // only ever carries title/artist/album/durationSec (never an id, which is
-// assigned by LRCLIB and only learned from the fetch this function exists
-// to skip). Pasted songs are never written here (no lrclibId, see cacheSong),
-// so this can only ever match a song that came from a previous LRCLIB pick.
-export async function getCachedSongByTitleArtist(title: string, artist: string): Promise<Song | null> {
+// assigned by LRCLIB and only learned from the fetch this function exists to
+// skip). Pasted lyrics are never written here (no lrclibId, see cacheLyric).
+export async function getCachedLyricByTitleArtist(
+  title: string, artist: string,
+): Promise<CachedLyric | null> {
   const d = await db()
   return new Promise((resolve, reject) => {
-    const req = d.transaction(STORE, 'readonly').objectStore(STORE).index(TITLE_ARTIST_INDEX).get([title, artist])
-    req.onsuccess = () => resolve((req.result as Song) ?? null)
+    const req = d.transaction(STORE, 'readonly').objectStore(STORE)
+      .index(TITLE_ARTIST_INDEX).get([title, artist])
+    req.onsuccess = () => resolve((req.result as CachedLyric) ?? null)
     req.onerror = () => reject(req.error)
   })
 }

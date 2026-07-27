@@ -198,8 +198,8 @@ describe('fetchLyrics', () => {
   })
 
   // --- Finding 4: the id must come back too, or the caller has no key to
-  // cache the song under (see storage/index.ts's getCachedSongByTitleArtist
-  // and cacheSong, which key on it). ---
+  // cache the lyric under (see storage/index.ts's getCachedLyricByTitleArtist
+  // and cacheLyric, which key on it). ---
 
   it('returns the record id alongside the parsed lines', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>

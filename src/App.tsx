@@ -6,8 +6,8 @@ import { annotateLine } from './annotate'
 import { loadDict, type Dict } from './dict'
 import { createAudioEngine } from './audio'
 import { createPlayer, type Player, type PlayerState } from './player'
-import { loadSettings, saveSettings, cacheSong, getCachedSongByTitleArtist, type Settings } from './storage'
-import type { Line, Song, SongCandidate } from './types'
+import { loadSettings, saveSettings, cacheLyric, getCachedLyricByTitleArtist, type Settings } from './storage'
+import type { Line, SongCandidate } from './types'
 import SearchBar from './ui/SearchBar'
 import PasteBox from './ui/PasteBox'
 import Transport from './ui/Transport'
@@ -171,15 +171,16 @@ export default function App() {
     try {
       // Finding 4: a SongCandidate never carries LRCLIB's id (that's only
       // learned from the fetch below), so title+artist is the only key
-      // available before any network call -- see getCachedSongByTitleArtist's
+      // available before any network call -- see getCachedLyricByTitleArtist's
       // own comment in storage/index.ts. A hit here skips fetchLyrics
-      // entirely: no network call, and the lines are already annotated.
+      // entirely: no network call, though the raw lines still need
+      // annotating (the cache is language-independent; see storage/index.ts).
       // Wrapped separately so a cache-read failure (e.g. no IndexedDB
       // support) fails OPEN into a normal fetch, rather than aborting the
       // pick via the outer catch below.
-      const cached = await getCachedSongByTitleArtist(c.title, c.artist).catch(() => null)
+      const cached = await getCachedLyricByTitleArtist(c.title, c.artist).catch(() => null)
       if (cached) {
-        if (gen === genRef.current) setLines(cached.lines)
+        await annotate(cached.raw, gen)
         return
       }
 
@@ -193,10 +194,14 @@ export default function App() {
       // lrclibId can be missing on an otherwise-valid LRCLIB record; caching
       // requires it since it's the cache's own lookup key.
       if (out && result.lrclibId != null) {
-        const song: Song = { title: c.title, artist: c.artist, lines: out, source: 'lrclib', lrclibId: result.lrclibId }
         // Fire-and-forget: a failed write shouldn't block playback, and (per
         // Finding 3's lesson) must not escape as an unhandled rejection.
-        void cacheSong(song).catch(() => {})
+        void cacheLyric({
+          lrclibId: result.lrclibId,
+          title: c.title,
+          artist: c.artist,
+          raw: result.raw,
+        }).catch(() => {})
       }
     } catch (e) {
       if (gen !== genRef.current) return
