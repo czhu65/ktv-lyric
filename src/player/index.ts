@@ -10,6 +10,9 @@ export interface PlayerState {
   playing: boolean
   lineIndex: number
   charIndex: number
+  /** Set when the most recent start() attempt (unlock/prefetch) failed;
+   *  cleared to null on the next attempt that gets past unlock+prefetch. */
+  error: string | null
 }
 
 export interface PlayerDeps {
@@ -20,7 +23,10 @@ export interface PlayerDeps {
 }
 
 export interface Player {
-  playLine(line: Line): void
+  /** `lineIndex` is the line's position within the full lyric, NOT always 0
+   *  -- it becomes the emitted PlayerState.lineIndex, which is what the UI
+   *  uses to decide which line to highlight. */
+  playLine(line: Line, lineIndex: number): void
   playAll(lines: Line[]): void
   stop(): void
   setInterLineGap(sec: number): void
@@ -34,7 +40,7 @@ export function createPlayer({ engine, now, schedule }: PlayerDeps): Player {
   let events: Event[] = []
   let cursor = 0
   let generation = 0
-  let state: PlayerState = { playing: false, lineIndex: -1, charIndex: -1 }
+  let state: PlayerState = { playing: false, lineIndex: -1, charIndex: -1, error: null }
   const subs = new Set<(s: PlayerState) => void>()
 
   const emit = (patch: Partial<PlayerState>) => {
@@ -85,20 +91,40 @@ export function createPlayer({ engine, now, schedule }: PlayerDeps): Player {
   async function start(lines: Line[], startLine: number) {
     generation++
     const gen = generation
-    await engine.unlock()
-    await engine.prefetch(
-      lines.flatMap((l) => l.tokens.flatMap((t) => t.chars.flatMap((c) => c.syllables))),
-    )
+    try {
+      await engine.unlock()
+      await engine.prefetch(
+        lines.flatMap((l) => l.tokens.flatMap((t) => t.chars.flatMap((c) => c.syllables))),
+      )
+    } catch (err) {
+      // A failed manifest/clip fetch must not leave `playing` stuck true
+      // from some earlier, still-displayed playback, and must not vanish
+      // silently -- surface it on state for the UI to turn into a notice.
+      if (gen !== generation) return // superseded by a newer start() already
+      emit({ playing: false, error: err instanceof Error ? err.message : 'Playback failed' })
+      return
+    }
     if (gen !== generation) return
     events = build(lines, startLine)
     cursor = 0
-    emit({ playing: true })
+    emit({ playing: true, error: null })
     pump(gen)
   }
 
+  // .catch() here is the safety net that keeps a rejection from ever
+  // escaping start() as an unhandled promise rejection -- start()'s own
+  // try/catch already handles the expected unlock/prefetch failures above;
+  // this only matters for a genuinely unexpected throw (e.g. inside build()
+  // or pump()).
+  const startSafe = (lines: Line[], startLine: number) => {
+    start(lines, startLine).catch((err: unknown) => {
+      emit({ playing: false, error: err instanceof Error ? err.message : 'Playback failed' })
+    })
+  }
+
   return {
-    playLine: (line) => void start([line], 0),
-    playAll: (lines) => void start(lines, 0),
+    playLine: (line, lineIndex) => startSafe([line], lineIndex),
+    playAll: (lines) => startSafe(lines, 0),
     stop() {
       generation++
       events = []
