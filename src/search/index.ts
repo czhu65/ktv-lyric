@@ -61,9 +61,17 @@ export async function searchSongs(query: string): Promise<SongCandidate[]> {
   return [...merged.values()]
 }
 
-export async function fetchLyrics(c: SongCandidate): Promise<SourceLine[] | null> {
+export interface LyricsResult {
+  raw: SourceLine[]
+  /** LRCLIB's own record id. Undefined for a hit whose record omits it
+   *  (shouldn't happen in practice, but the field is optional on
+   *  LrclibRecord) -- callers that want to cache the result must check it. */
+  lrclibId?: number
+}
+
+export async function fetchLyrics(c: SongCandidate): Promise<LyricsResult | null> {
   const rec = await lrclibGet(c)
   const body = rec?.syncedLyrics || rec?.plainLyrics
   if (!body) return null
-  return parseLyricText(body)
+  return { raw: parseLyricText(body), lrclibId: rec?.id }
 }

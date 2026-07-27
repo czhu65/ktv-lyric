@@ -115,7 +115,18 @@ describe('fetchLyrics', () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({ id: 1, syncedLyrics: '[00:01.00]唱', plainLyrics: '歌' }))))
     const r = await fetchLyrics({ title: 'T', artist: 'A' })
-    expect(r).toEqual([{ text: '唱', timeMs: 1000 }])
+    expect(r).toEqual({ raw: [{ text: '唱', timeMs: 1000 }], lrclibId: 1 })
+  })
+
+  // --- Finding 4: the id must come back too, or the caller has no key to
+  // cache the song under (see storage/index.ts's getCachedSongByTitleArtist
+  // and cacheSong, which key on it). ---
+
+  it('returns the record id alongside the parsed lines', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ id: 99, syncedLyrics: '[00:01.00]唱歌', plainLyrics: null }))))
+    const r = await fetchLyrics({ title: 'T', artist: 'A' })
+    expect(r?.lrclibId).toBe(99)
   })
 
   it('returns null on a 404 miss so the caller can offer the paste box', async () => {

@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
-import { loadSettings, saveSettings, SETTINGS_KEY, DEFAULT_SETTINGS, cacheSong, getCachedSong } from './index'
+import {
+  loadSettings, saveSettings, SETTINGS_KEY, DEFAULT_SETTINGS,
+  cacheSong, getCachedSong, getCachedSongByTitleArtist,
+} from './index'
 import type { Song } from '../types'
 
 describe('settings', () => {
@@ -25,9 +28,12 @@ describe('settings', () => {
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS)
   })
 
-  it('ignores unknown fields and clamps out-of-range gaps', () => {
+  it('ignores unknown fields and clamps out-of-range gaps to the slider\'s own max', () => {
+    // SettingsPanel.tsx's <input type="range"> caps at max={5} -- storage's
+    // clamp must agree, or a value the UI can never produce (or dial back
+    // down from) could still land in localStorage.
     saveSettings({ ...DEFAULT_SETTINGS, interLineGapSec: 999 })
-    expect(loadSettings().interLineGapSec).toBeLessThanOrEqual(10)
+    expect(loadSettings().interLineGapSec).toBeLessThanOrEqual(5)
   })
 })
 
@@ -70,5 +76,26 @@ describe('song cache', () => {
     const updated: Song = { ...song, title: 'Updated Title' }
     await cacheSong(updated)
     expect(await getCachedSong(42)).toEqual(updated)
+  })
+
+  // --- Finding 4: a picked SongCandidate never carries lrclibId (only
+  // title/artist), so a repeat pick needs a way to find the cached song
+  // WITHOUT already knowing its id -- that's what this index is for. ---
+
+  describe('getCachedSongByTitleArtist', () => {
+    it('finds a cached song by title and artist, without needing its lrclibId', async () => {
+      await cacheSong(song)
+      expect(await getCachedSongByTitleArtist(song.title, song.artist)).toEqual(song)
+    })
+
+    it('returns null when no cached song matches the title/artist pair', async () => {
+      await cacheSong(song)
+      expect(await getCachedSongByTitleArtist('Nope', 'Nobody')).toBeNull()
+      expect(await getCachedSongByTitleArtist(song.title, 'Wrong Artist')).toBeNull()
+    })
+
+    it('returns null against an empty cache', async () => {
+      expect(await getCachedSongByTitleArtist(song.title, song.artist)).toBeNull()
+    })
   })
 })
