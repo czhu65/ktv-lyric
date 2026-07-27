@@ -1073,20 +1073,14 @@ export interface SongCandidate {
 }
 ```
 
-Also add `lang` to `Song`:
+**Do NOT add `lang` to `Song` in this task.** Making it required here breaks
+`tsc` immediately: `Song` is constructed at `src/App.tsx:196` and
+`src/storage/index.test.ts:49`, and neither is rewritten until Tasks 10 and 13.
 
-```ts
-export interface Song {
-  title: string
-  artist: string
-  lines: Line[]
-  source: 'lrclib' | 'pasted'
-  lrclibId?: number
-  /** Which pack produced `lines`. A Song is an annotated VIEW, so this says
-   *  what you are looking at, not an immutable property of the recording. */
-  lang: LangId
-}
-```
+Deferred to **Task 13**, which rewrites `App.tsx`. By then Task 10 has replaced
+the cached `Song` with `CachedLyric`, so Task 13 must first decide whether
+`Song` still has any constructor at all — if nothing builds one, delete the
+interface as dead code rather than adding a field to it.
 
 - [ ] **Step 5: Run test to verify it passes**
 
