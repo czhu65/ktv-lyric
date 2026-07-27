@@ -9,11 +9,10 @@ const MARKS: Record<string, string[]> = {
   i: ['ī', 'í', 'ǐ', 'ì'],
   o: ['ō', 'ó', 'ǒ', 'ò'],
   u: ['ū', 'ú', 'ǔ', 'ù'],
-  v: ['ǜ', 'ǘ', 'ǚ', 'ǜ'], // placeholder row, replaced below
+  // ü's four marked forms don't follow the same table shape as the plain
+  // vowels, so they are spelled out rather than derived.
+  v: ['ǖ', 'ǘ', 'ǚ', 'ǜ'],
 }
-// ü's four marked forms don't follow the same table shape as the plain vowels,
-// so they are spelled out rather than derived.
-MARKS.v = ['ǖ', 'ǘ', 'ǚ', 'ǜ']
 
 const CANONICAL = /^([a-z]+)([0-4])$/
 

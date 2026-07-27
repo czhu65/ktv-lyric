@@ -127,6 +127,11 @@ describe('App', () => {
 
     // No further user action -- this must complete on its own.
     expect(await screen.findByRole('button', { name: /唱/ }, { timeout: 5000 })).toBeInTheDocument()
+    // The queued replay must also clear the "still loading" notice -- a
+    // rendered lyric under a red alert claiming the dictionary is still
+    // loading is stale and misleading, even though it is technically true
+    // that the dictionary WAS loading at some point.
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   // --- Finding 4 (this pass): picking an already-cached song must reuse it
@@ -418,7 +423,7 @@ describe('language toggle', () => {
     }
   })
 
-  it('reverts the toggle with a message when the language pack fails to load', async () => {
+  it('shows a message and leaves the toggle on Cantonese when the language pack fails to load', async () => {
     const user = userEvent.setup()
     render(<App />)
     await pasteLyric(user, '天空')
@@ -434,11 +439,20 @@ describe('language toggle', () => {
 
       const alert = await screen.findByRole('alert', {}, { timeout: 2000 })
       expect(alert).toHaveTextContent(/could not load that language/i)
-      // Not half-switched: the toggle is back where it was and the lyric is
-      // still the Cantonese one it was already showing.
+      // `pack.id` never moved to 'cmn' in the first place -- selectPack
+      // only calls setPack after getPack resolves, and this getPack call
+      // rejected -- so there is no toggle position to revert; the lyric,
+      // too, was never re-annotated. This asserts "stayed on Cantonese
+      // throughout", not "moved and moved back".
       expect(screen.getByRole('button', { name: /粵語/ })).toHaveAttribute('aria-pressed', 'true')
       expect(screen.getByRole('button', { name: /普通話/ })).toHaveAttribute('aria-pressed', 'false')
       expect(screen.getByText(YUE_TIN)).toBeInTheDocument()
+      // packBusy is cleared once the failed attempt settles, so the toggle
+      // is usable again for a retry -- a real assertion a broken
+      // "never clear packBusy on failure" bug would fail, unlike the
+      // aria-pressed checks above which hold even if the toggle were
+      // permanently stuck disabled.
+      expect(screen.getByRole('button', { name: /普通話/ })).not.toBeDisabled()
     } finally {
       spy.mockRestore()
     }

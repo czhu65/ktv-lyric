@@ -186,6 +186,17 @@ carries its own directory and manifest.
 The Mandarin pack is a lazy chunk, so a Cantonese-only user never downloads pinyin-pro — the
 pattern `opencc-js` already uses.
 
+### 6.1 Amendment, 2026-07-27 (found during Task 13 implementation)
+
+The table above lists `types.ts` | `Song` gains `lang: LangId`. **`Song` was instead deleted
+outright, as dead code, during Task 13.** Nothing had ever constructed one: the IndexedDB cache
+stores raw, language-independent lines (`CachedLyric`, see §7), and `App` holds the annotated
+lines together with the pack that produced them, in its own `view` state. A `Song` extended with
+`lang` would have been a third representation of the same lyric, with no owner and no way to stay
+honest about which language it had been annotated in — so Task 13 removed it rather than extend
+it. `src/types.ts` documents this in place; `Char`, `Token` and `Line` are exactly as this section
+described and remain untouched.
+
 ## 7. Cache restructuring
 
 `cacheSong()` currently stores the fully *annotated* `Song`, with Jyutping baked into every token.
@@ -245,6 +256,23 @@ fails loudly listing any key that produced no audio rather than shipping a bank 
 
 Size: ~6 MB on top of the existing 17 MB, against a 1 GB Pages cap.
 
+### 8.1 Amendment, 2026-07-27 (found during Task 15/16 implementation)
+
+§3 and this section locked Amazon Polly as THE Mandarin audio backend. **That is not what Task
+15/16 built, and no Mandarin audio bank shipped on this branch at all.** `public/audio/pin/` and
+`public/data/pinyin.json` do not exist — `scripts/coverage.test.mjs`'s Mandarin coverage check
+`skipIf`s itself on that absence rather than asserting against a bank that was never generated.
+
+`scripts/build-pinyin-audio.mjs` was written to support **two** backends, selected with
+`--backend=piper|polly` (default `piper`): Piper is a fully offline, local TTS engine that derives
+the reading from characters rather than being told a phoneme directly, so it needs no AWS account,
+no credentials, and produces no invoice — the Polly path this section describes is still there,
+gated behind `--backend=polly`, but it is no longer the sole or default plan, and it has not been
+run to produce anything that shipped.
+
+Whoever eventually runs the build script to populate `public/audio/pin/` determines which backend
+was actually used, and §12's credit (see below) should name that backend, not necessarily Polly.
+
 ## 9. Error handling
 
 `audio/index.ts` already returns `null` for a syllable absent from the manifest, and
@@ -290,6 +318,14 @@ Unchanged obligations, plus:
 
 The app stays non-commercial and un-monetised: words.hk and rime-cantonese upstream data prohibit
 commercial use.
+
+### 12.1 Amendment, 2026-07-27 (found during Task 15/16 implementation)
+
+See §8.1: this branch ships **no** Mandarin audio bank, so there is no Polly credit to add yet —
+`Credits.tsx` is unchanged from the Cantonese-only app for this reason, not by oversight. When a
+Mandarin audio bank is eventually built, credit whichever `--backend` actually produced it: Piper
+(the new default) is a local model and needs a model-license credit, not a Polly one; only a
+`--backend=polly` run would need the Polly credit as originally written above.
 
 ## 13. Out of scope
 

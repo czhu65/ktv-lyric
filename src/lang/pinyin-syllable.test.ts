@@ -61,4 +61,35 @@ describe('the build-script normalizer agrees with the app normalizer', () => {
       expect(normalizeSyllable(raw)).toBe(normalizePinyinSyllable(raw))
     }
   })
+
+  // The 9 hand-picked inputs above only catch a divergence the author
+  // thought to type in. They cannot catch, say, pinyin-pro widening its tone
+  // range to 0-5 (a new digit neither list-writer anticipated) or adding a
+  // ü spelling neither normalizer's regex accepts -- both normalizers would
+  // silently agree to reject or mis-fold something new. This loop instead
+  // feeds pinyin-pro's OWN current output -- every reading (`multiple:
+  // true`) of a wide sweep of CJK Unified Ideographs, not a curated list --
+  // through both normalizers and asserts they agree on every single one, so
+  // any future divergence in either normalizer's accepted input shape shows
+  // up here without anyone having to predict it in advance. Not lyrics, not
+  // a fixture of song text -- just a scan of Unicode codepoints for
+  // characters that happen to be Han.
+  it('agrees on every reading pinyin-pro produces for a broad sweep of Han characters', () => {
+    const rawReadings: string[] = []
+    for (let cp = 0x4e00; cp <= 0x9fa5; cp += 7) {
+      const ch = String.fromCodePoint(cp)
+      const out = pinyin(ch, { toneType: 'num', type: 'array', multiple: true })
+      const readings = Array.isArray(out) ? out : [out]
+      rawReadings.push(...readings)
+    }
+    expect(rawReadings.length).toBeGreaterThan(1000)
+
+    let agreements = 0
+    for (const raw of rawReadings) {
+      expect(normalizeSyllable(raw)).toBe(normalizePinyinSyllable(raw))
+      agreements++
+    }
+    // A loop that silently iterated zero times would pass vacuously.
+    expect(agreements).toBe(rawReadings.length)
+  })
 })

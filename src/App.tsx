@@ -242,7 +242,15 @@ export default function App() {
     if (!dict || !pendingRef.current) return
     const pending = pendingRef.current
     pendingRef.current = null
-    void annotate(pending.raw, pending.pack, pending.gen)
+    void annotate(pending.raw, pending.pack, pending.gen).then((out) => {
+      // out is undefined if this replay was itself superseded before
+      // finishing -- leave whatever notice the newer action left behind.
+      // Otherwise the lyric that was queued is now on screen, so the
+      // "Dictionary is still loading" notice set when it was queued (line
+      // 199 above) is stale and must go, or the user sees a rendered lyric
+      // under a red alert claiming it is still loading.
+      if (out !== undefined) setNotice(null)
+    })
   }, [dict, annotate])
 
   /**
@@ -438,10 +446,12 @@ export default function App() {
 
         {view && dict ? (
           <>
-            {/* The toggle shows the DESIRED language (immediate feedback on
-                tap); the lyric below it shows the pack that actually
-                annotated what you are reading. They converge within a tick,
-                and `busy` keeps the control disabled until they do. */}
+            {/* value={pack.id} reflects `pack` state, which selectPack only
+                sets AFTER the (possibly lazy-chunk-fetching) getPack call
+                resolves -- so the toggle does not move optimistically on
+                tap. `packBusy` disables it for the duration instead, and it
+                moves in the same commit as the lyric below it re-annotates,
+                so the two are never seen out of step. */}
             <LangToggle
               value={pack.id}
               busy={packBusy || busy}

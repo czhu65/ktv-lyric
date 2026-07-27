@@ -3,7 +3,7 @@ import { pinyin } from 'pinyin-pro'
 
 // Mirror of src/lang/pinyin-syllable.ts's normalizePinyinSyllable. Duplicated
 // because build scripts are plain ESM with no TypeScript pipeline;
-// scripts/pinyin-coverage.test.mjs (Task 16) asserts the two stay in agreement.
+// src/lang/pinyin-syllable.test.ts asserts the two stay in agreement.
 const TONED = /^([a-z]+)([0-5]?)$/
 
 export function normalizeSyllable(raw) {

@@ -1,8 +1,20 @@
 import { describe, it, expect } from 'vitest'
 import { normalizeSyllable, derivePinyinInventory } from './pinyin-inventory.mjs'
+// This file is plain ESM (see the comment atop pinyin-inventory.mjs), but
+// vitest transforms TypeScript regardless of the importing file's own
+// extension, so this import is real, not aspirational -- unlike the old
+// version of the test below, which hardcoded 6 expectations against
+// normalizeSyllable alone and would keep passing after the two normalizers
+// diverged.
+import { normalizePinyinSyllable } from '../../src/lang/pinyin-syllable.ts'
 
 describe('normalizeSyllable', () => {
   it('matches the TypeScript normalizer exactly', () => {
+    for (const raw of ['wo3', 'de5', 'de', 'lü4', 'wo7', '']) {
+      expect(normalizeSyllable(raw)).toBe(normalizePinyinSyllable(raw))
+    }
+    // And pin down the actual values, so a bug shared by both normalizers
+    // (which would pass the comparison above) still gets caught.
     expect(normalizeSyllable('wo3')).toBe('wo3')
     expect(normalizeSyllable('de5')).toBe('de0')
     expect(normalizeSyllable('de')).toBe('de0')
