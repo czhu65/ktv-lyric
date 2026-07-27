@@ -110,4 +110,20 @@ describe('lyric cache', () => {
   it('returns null for an unknown id', async () => {
     expect(await getCachedLyric(9999)).toBeNull()
   })
+
+  it('is a no-op for a record with no lrclibId', async () => {
+    // lrclibId is the keyPath, so writing an id-less record would throw.
+    // Pasted lyrics have no id and must be silently skipped, not crash the
+    // fire-and-forget write in App.tsx's onPick.
+    const noId = { lrclibId: 0, title: '天空', artist: '歌手', raw: [{ text: '天空' }] }
+    await expect(cacheLyric(noId)).resolves.toBeUndefined()
+    expect(await getCachedLyric(0)).toBeNull()
+  })
+
+  it('overwrites on a second write to the same key', async () => {
+    await cacheLyric({ lrclibId: 7, title: '天空', artist: '歌手', raw: [{ text: '天空' }] })
+    await cacheLyric({ lrclibId: 7, title: '天空', artist: '歌手', raw: [{ text: '你好' }] })
+    const got = await getCachedLyric(7)
+    expect(got?.raw).toEqual([{ text: '你好' }])
+  })
 })
