@@ -18,6 +18,13 @@ async function dedupeKey(c: SongCandidate): Promise<string> {
   return `${title}${SEP}${artist}`.toLowerCase()
 }
 
+// HK and TW only. Both return native Chinese metadata, and between them they
+// cover the catalogue. US is deliberately excluded -- see the plan's Task 8
+// note: its apparent extra results are the same recordings under romanized
+// metadata that dedupeKey() cannot collapse, so including it would fill the
+// picker with duplicate rows.
+const STOREFRONTS = ['HK', 'TW'] as const
+
 /**
  * LRCLIB and iTunes both do zero query-time script folding, so a Simplified
  * query and its Traditional equivalent return disjoint result sets. Always
@@ -26,10 +33,12 @@ async function dedupeKey(c: SongCandidate): Promise<string> {
 export async function searchSongs(query: string): Promise<SongCandidate[]> {
   const variants = await scriptVariants(query)
 
+  const jobs = variants.flatMap((v) => STOREFRONTS.map((c) => ({ v, c })))
+
   const batches = await Promise.all(
-    variants.map(async (v) => {
+    jobs.map(async ({ v, c }) => {
       try {
-        return await searchItunes(v)
+        return await searchItunes(v, c)
       } catch (err) {
         // Defensive: searchItunes never actually throws RateLimitError today
         // (it only talks to iTunes, never LRCLIB), but if that ever changes,
@@ -56,7 +65,18 @@ export async function searchSongs(query: string): Promise<SongCandidate[]> {
 
   const merged = new Map<string, SongCandidate>()
   for (const [k, c] of keyed) {
-    if (!merged.has(k)) merged.set(k, c)
+    const existing = merged.get(k)
+    if (!existing) {
+      merged.set(k, c)
+      continue
+    }
+    // HK and TW label the same recording differently (廣東歌/香港流行樂 vs
+    // 粵語流行樂), and one storefront may tag it with an uninformative genre
+    // while the other is specific. Blind first-wins would throw away a
+    // resolved guess purely because of request ordering.
+    if (existing.langGuess === undefined && c.langGuess !== undefined) {
+      merged.set(k, { ...existing, genre: c.genre, langGuess: c.langGuess })
+    }
   }
   return [...merged.values()]
 }

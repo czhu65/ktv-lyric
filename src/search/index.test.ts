@@ -26,7 +26,8 @@ describe('searchSongs', () => {
     vi.stubGlobal('fetch', f)
 
     const r = await searchSongs('浮夸')
-    expect(f).toHaveBeenCalledTimes(2)
+    // 2 script variants x 2 storefronts (HK, TW) = 4 requests.
+    expect(f).toHaveBeenCalledTimes(4)
     expect(r.map((x) => x.title).sort()).toEqual(['Song One', 'Song Two'])
   })
 
@@ -40,7 +41,8 @@ describe('searchSongs', () => {
     vi.stubGlobal('fetch', f)
 
     const r = await searchSongs('陈奕迅')
-    expect(f).toHaveBeenCalledTimes(2)
+    // 2 script variants x 2 storefronts (HK, TW) = 4 requests.
+    expect(f).toHaveBeenCalledTimes(4)
     expect(r).toHaveLength(1)
   })
 
@@ -57,7 +59,8 @@ describe('searchSongs', () => {
     vi.stubGlobal('fetch', f)
 
     const r = await searchSongs('陈奕迅')
-    expect(f).toHaveBeenCalledTimes(2)
+    // 2 script variants x 2 storefronts (HK, TW) = 4 requests.
+    expect(f).toHaveBeenCalledTimes(4)
     expect(r).toHaveLength(1)
   })
 
@@ -97,6 +100,63 @@ describe('searchSongs', () => {
     const err: unknown = await searchSongs('AB').catch((e) => e)
     expect(err).toBeInstanceOf(RateLimitError)
     expect((err as RateLimitError).retryAfterSec).toBe(17)
+  })
+})
+
+describe('storefront fan-out', () => {
+  it('queries HK and TW for every script variant', async () => {
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      seen.push(url)
+      return { ok: true, json: async () => ({ results: [] }) }
+    }))
+
+    // 浮誇 is Traditional and HAS a distinct Simplified form (浮夸), so
+    // scriptVariants yields TWO variants -- 2 variants x 2 storefronts = 4
+    // requests. Do not "simplify" this to 1 each; that expectation is wrong.
+    await searchSongs('浮誇')
+
+    expect(seen.filter((u) => u.includes('country=HK'))).toHaveLength(2)
+    expect(seen.filter((u) => u.includes('country=TW'))).toHaveLength(2)
+    expect(seen.filter((u) => u.includes('country=US'))).toHaveLength(0)
+  })
+
+  it('carries the genre through and derives a guess', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        results: [{ trackName: '浮誇', artistName: '陳奕迅', primaryGenreName: '廣東歌/香港流行樂' }],
+      }),
+    })))
+
+    const [song] = await searchSongs('浮誇')
+
+    expect(song.genre).toBe('廣東歌/香港流行樂')
+    expect(song.langGuess).toBe('yue')
+  })
+
+  it('prefers a defined langGuess when merging duplicate rows', async () => {
+    // HK labels it 廣東歌/香港流行樂; TW returns the same recording tagged with
+    // an uninformative genre. The merged row must keep the resolved guess.
+    let call = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call++
+      return {
+        ok: true,
+        json: async () => ({
+          results: [{
+            trackName: '浮誇',
+            artistName: '陳奕迅',
+            primaryGenreName: call === 1 ? '流行樂' : '廣東歌/香港流行樂',
+          }],
+        }),
+      }
+    }))
+
+    const merged = await searchSongs('浮誇')
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0].langGuess).toBe('yue')
   })
 })
 
