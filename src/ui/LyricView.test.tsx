@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest'
 import LyricView from './LyricView'
 import { renderCount as lyricLineRenderCount, resetRenderCount as resetLyricLineRenderCount } from './LyricLine'
 import { createDict } from '../dict'
+import { createAudioEngine } from '../audio'
 import { DEFAULT_SETTINGS } from '../storage'
 
 // NOTE on 'coeng3' -> 'coeng1': the brief's fixture paired 唱 with tone 3 but
@@ -22,7 +23,8 @@ const lines = [{
 const dict = createDict({ '唱歌': 'to sing a song' })
 
 const engine = () => ({
-  unlock: vi.fn(async () => {}), has: (_s: string) => true, duration: () => 0.4,
+  unlock: vi.fn(async () => {}), preloadManifest: vi.fn(async () => {}),
+  has: (_s: string) => true, duration: () => 0.4,
   load: vi.fn(async () => null), prefetch: vi.fn(async () => {}), play: vi.fn(() => 0.4),
   playSequence: vi.fn(),
 })
@@ -96,6 +98,53 @@ describe('LyricView', () => {
       activeLine={-1} activeChar={-1} onPlayLine={() => {}} />)
     expect(screen.getByRole('button', { name: /歌/ })).toHaveAttribute('data-noaudio', 'true')
     expect(screen.getByRole('button', { name: /唱/ })).not.toHaveAttribute('data-noaudio')
+  })
+
+  // --- Finding 2: every character used to render "no audio" before the
+  // manifest had loaded. Every test above stubs `has: () => true`, which is
+  // exactly why that bug was invisible here. ---
+
+  it('shows no no-audio marker on any character when rendered with a real engine whose manifest has not resolved', () => {
+    // A fetch that never resolves keeps the real engine's manifest at null
+    // (genuinely "not yet known") for the lifetime of this synchronous test.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    const fakeCtx = {
+      currentTime: 0,
+      state: 'suspended' as AudioContextState,
+      destination: {} as AudioDestinationNode,
+      resume: vi.fn(async () => {}),
+      decodeAudioData: vi.fn(async () => ({ duration: 0.4 }) as AudioBuffer),
+      createBufferSource: vi.fn(() => ({ buffer: null, connect: vi.fn(), start: vi.fn(), stop: vi.fn() })),
+    }
+    const realEngine = createAudioEngine(fakeCtx as unknown as BaseAudioContext)
+
+    render(<LyricView lines={lines} dict={dict} engine={realEngine} settings={DEFAULT_SETTINGS}
+      activeLine={-1} activeChar={-1} onPlayLine={() => {}} />)
+
+    expect(screen.getByRole('button', { name: /唱/ })).not.toHaveAttribute('data-noaudio')
+    expect(screen.getByRole('button', { name: /歌/ })).not.toHaveAttribute('data-noaudio')
+    vi.unstubAllGlobals()
+  })
+
+  it('settles to the real no-audio state once the manifest arrives (audioReady flips true)', () => {
+    // Stubbed to report 'go1' as genuinely missing -- with audioReady still
+    // false, the marker must not show yet, even though has() itself would
+    // already answer accurately (it's a plain stub here, not the real
+    // null-manifest engine). Once audioReady flips true, the same has()
+    // answer must now be trusted and rendered.
+    const e = engine()
+    e.has = (s: string) => s !== 'go1'
+    const { rerender } = render(
+      <LyricView lines={lines} dict={dict} engine={e} settings={DEFAULT_SETTINGS}
+        activeLine={-1} activeChar={-1} audioReady={false} onPlayLine={() => {}} />,
+    )
+    expect(screen.getByRole('button', { name: /歌/ })).not.toHaveAttribute('data-noaudio')
+
+    rerender(
+      <LyricView lines={lines} dict={dict} engine={e} settings={DEFAULT_SETTINGS}
+        activeLine={-1} activeChar={-1} audioReady onPlayLine={() => {}} />,
+    )
+    expect(screen.getByRole('button', { name: /歌/ })).toHaveAttribute('data-noaudio', 'true')
   })
 
   // --- Beyond the brief: checks requested in the task, not in the original spec ---

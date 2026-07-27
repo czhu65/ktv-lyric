@@ -3,7 +3,7 @@ import type { Line, Token } from '../types'
 import type { Dict } from '../dict'
 import type { AudioEngine } from '../audio'
 import type { Settings } from '../storage'
-import { toYale } from '../romanize/yale'
+import { showRomanization } from '../romanize/show'
 import GlossPopover from './GlossPopover'
 import LyricLine from './LyricLine'
 import './lyric.css'
@@ -15,14 +15,18 @@ interface Props {
   settings: Settings
   activeLine: number
   activeChar: number
+  /** True once the audio manifest has loaded. Defaults to true so callers
+   *  (and every existing test) that don't care about the loading window
+   *  keep the old, always-settled behaviour -- see Finding 2. */
+  audioReady?: boolean
   onPlayLine(lineIndex: number): void
 }
 
 export default function LyricView(
-  { lines, dict, engine, settings, activeLine, activeChar, onPlayLine }: Props,
+  { lines, dict, engine, settings, activeLine, activeChar, audioReady = true, onPlayLine }: Props,
 ) {
   const [selected, setSelected] = useState<Token | null>(null)
-  const show = (s: string) => (settings.romanization === 'yale' ? toYale(s) : s)
+  const show = (s: string) => showRomanization(s, settings.romanization)
 
   // ONE gesture, TWO outcomes: audio fires immediately and is never gated on
   // the popover. The gloss is for the enclosing token, not the character.
@@ -47,6 +51,7 @@ export default function LyricView(
           lineIndex={li}
           engine={engine}
           settings={settings}
+          audioReady={audioReady}
           activeCharInThisLine={li === activeLine ? activeChar : null}
           onPlayLine={onPlayLine}
           onTapChar={onTapChar}
