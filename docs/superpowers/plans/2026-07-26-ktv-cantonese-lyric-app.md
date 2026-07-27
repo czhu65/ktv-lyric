@@ -20,7 +20,7 @@ Every task's requirements implicitly include this section.
 - **Namespace every storage key.** Settings `ktvlyric:*`, IndexedDB `ktv-lyric-v1`, Cache Storage `ktv-lyric-audio-v1`. All of `username.github.io/*` shares one browser origin and a bare key *will* collide with other Pages projects.
 - **Never Git LFS.** Pages serves the pointer stub. Audio files are committed as ordinary files.
 - **No lyric fixtures in the repo, ever** — including tests. Use short synthetic phrases. The "we host zero lyrics" property must hold for the test suite too.
-- **`data/dict.json` ships uncompressed.** Fastly gzips `application/json` in transit (572 KB raw → ~245 KB on the wire). Do **not** commit a `.gz` — Pages cannot set `Content-Encoding`, so a `.gz` would arrive as opaque bytes. Pages serves gzip only, never brotli.
+- **`data/dict.json` ships uncompressed.** Fastly gzips `application/json` in transit (~2.1 MB raw → ~981 KB on the wire). Do **not** commit a `.gz` — Pages cannot set `Content-Encoding`, so a `.gz` would arrive as opaque bytes. Pages serves gzip only, never brotli.
 - **The dictionary stays a separate `.json` file.** CC BY-SA ShareAlike binds the data file, not the app code. Never inline it into a JS bundle.
 - **Audio is 48 kbps mono MP3.** Never Opus — macOS Safari support is only partial.
 - **Every LRCLIB request sends `Lrclib-Client: ktv-lyric/<version> (<site url>)`.** `User-Agent` is a forbidden header in browsers; this is the only way to comply with their identification policy.
@@ -246,7 +246,7 @@ After pushing, enable Pages in repo Settings → Pages → Source: **GitHub Acti
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `public/data/dict.json`, shape `Record<string, string>` mapping a Traditional headword to a gloss of ≤40 characters. Both single characters and multi-character words are keys.
+- Produces: `public/data/dict.json`, shape `Record<string, string>` mapping a Traditional headword to a gloss of ≤40 characters. Keys are single characters and **two-character words only** — see the `MAX_WORD` comment for why the cap improves grouping rather than merely shrinking the file.
 
 - [ ] **Step 1: Write the failing parser test**
 
@@ -254,7 +254,7 @@ After pushing, enable Pages in repo Settings → Pages → Source: **GitHub Acti
 
 ```js
 import { describe, it, expect } from 'vitest'
-import { parseLine, cleanGloss, mergeKey } from './cedict.mjs'
+import { parseLine, cleanGloss } from './cedict.mjs'
 
 describe('parseLine', () => {
   it('parses a CC-CEDICT line', () => {
@@ -298,13 +298,6 @@ describe('cleanGloss', () => {
     expect(cleanGloss(['CL:個|个[ge4]'])).toBeNull()
   })
 })
-
-describe('mergeKey', () => {
-  it('normalizes pinyin case and spacing', () => {
-    expect(mergeKey({ trad: '一', simp: '一', pinyin: 'Yi1  Qi2' }))
-      .toBe(mergeKey({ trad: '一', simp: '一', pinyin: 'yi1 qi2' }))
-  })
-})
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -346,10 +339,6 @@ export function cleanGloss(glosses, max = 40) {
   const cut = out.slice(0, max)
   const sp = cut.lastIndexOf(' ')
   return (sp > max * 0.5 ? cut.slice(0, sp) : cut).trim()
-}
-
-export function mergeKey({ trad, simp, pinyin }) {
-  return `${trad} ${simp} ${pinyin.toLowerCase().split(/\s+/).join(' ')}`
 }
 ```
 
@@ -402,13 +391,16 @@ Expected: a non-zero line count. If the filename inside the archive differs, lis
 // Sources are downloaded, never committed.
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { gunzipSync, gzipSync } from 'node:zlib'
-import ToJyutping from 'to-jyutping'
-import { parseLine, cleanGloss, mergeKey } from './lib/cedict.mjs'
+import { parseLine, cleanGloss } from './lib/cedict.mjs'
 
 const CEDICT = 'https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz'
 const CANTO = 'https://cantonese.org/cccanto-170202.zip'
-const MAX_WORD = 6
-const BUDGET_GZIP = 400_000
+// Headwords are capped at 2 characters. Most Chinese compounds are two chars, so
+// the cap costs almost nothing in grouping quality and halves the payload — and it
+// stops greedy longest-match collapsing 愛情故事 into one opaque unit when 愛情 · 故事
+// is the better unit for a learner. Measured 2026-07-26: 77,122 entries, 981 KB gzip.
+const MAX_WORD = 2
+const BUDGET_GZIP = 1_200_000
 
 async function fetchText(url) {
   const res = await fetch(url)
@@ -417,46 +409,27 @@ async function fetchText(url) {
   return url.endsWith('.gz') ? gunzipSync(buf).toString('utf8') : buf
 }
 
-// to-jyutping's vocabulary is the ceiling: the annotator can never emit
-// anything outside it, so anything else is dead weight.
-function inVocabulary(word) {
-  if (word.length === 1) return ToJyutping.getJyutpingList(word)[0][1] !== null
-  return ToJyutping.getJyutpingList(word).every(([, j]) => j !== null)
-}
+const parseAll = (text) => text.split('\n').map(parseLine).filter(Boolean)
 
-const rows = []
-for (const line of (await fetchText(CEDICT)).split('\n')) {
-  const r = parseLine(line)
-  if (r) rows.push(r)
-}
-console.log(`CC-CEDICT rows: ${rows.length}`)
+// CC-Canto ships as a zip; Step 5 extracted it to scripts/.cache/cccanto.txt.
+const cantoRows = parseAll(readFileSync('scripts/.cache/cccanto.txt', 'utf8'))
+const cedictRows = parseAll(await fetchText(CEDICT))
+console.log(`CC-Canto rows: ${cantoRows.length}  CC-CEDICT rows: ${cedictRows.length}`)
 
-// CC-Canto ships as a zip. Unzip it manually first if `unzip` is unavailable:
-//   curl -sL <CANTO> -o /tmp/cccanto.zip && unzip -p /tmp/cccanto.zip > scripts/.cache/cccanto.txt
-const cantoText = readFileSync('scripts/.cache/cccanto.txt', 'utf8')
-const seen = new Map(rows.map((r) => [mergeKey(r), r]))
-let appended = 0
-for (const line of cantoText.split('\n')) {
-  const r = parseLine(line)
-  if (!r) continue
-  // Merge ONLY on (trad, simp, normalized-pinyin) AND absent jyutping.
-  // Anything else is appended as a distinct sense — collapsing on
-  // (trad, simp) alone resolves only 0.2% of collisions correctly.
-  const key = mergeKey(r)
-  if (!r.jyutping && seen.has(key)) {
-    seen.get(key).glosses.unshift(...r.glosses)
-  } else {
-    rows.push(r)
-    appended++
-  }
-}
-console.log(`CC-Canto rows appended as distinct senses: ${appended}`)
-
+// CC-CEDICT FIRST. It is the better general dictionary, and with the extended
+// NOISE filter skipping surname/bound-form/abbreviation rows it yields the correct
+// primary sense for common characters. CC-Canto then fills only the keys CC-CEDICT
+// lacks — which is exactly where the Cantonese-only vocabulary lives (入面, 落嚟,
+// 我哋). The colloquial characters CC-CEDICT gets wrong for Cantonese (睇, 諗, 佢,
+// 嘅) are handled by overrides.json, applied last, which wins over both.
+//
+// Measured 2026-07-26: both orderings give identical glosses for every colloquial
+// test word, while CC-Canto-first degrades common ones (去 -> "passed away",
+// 中 -> "(dialect) OK"). See the spec's "Source ordering" section.
 const dict = {}
-for (const r of rows) {
+for (const r of [...cedictRows, ...cantoRows]) {
   if (r.trad.length > MAX_WORD) continue
   if (dict[r.trad]) continue
-  if (!inVocabulary(r.trad)) continue
   const g = cleanGloss(r.glosses)
   if (g) dict[r.trad] = g
 }
@@ -489,7 +462,9 @@ writeFileSync(
 - [ ] **Step 7: Run the build and record the real numbers**
 
 Run: `node scripts/build-dict.mjs`
-Expected: prints entry count, raw bytes, gzip bytes; exits 0; `public/data/dict.json` exists. Spec predicts ~18,932 entries / ~245 KB gzip. **Record the actual figures in the commit message** — if they differ materially from the spec, note it rather than silently accepting.
+Expected: prints entry count, raw bytes, gzip bytes; exits 0; `public/data/dict.json` exists.
+
+Measured on 2026-07-26 against the real sources: **76,964 entries, 983,920 B gzip (~961 KB)**. You should land close to this — CC-CEDICT updates frequently, so a drift of a few percent is normal. **Record the actual figures in the commit message.** If you are off by more than ~10%, stop and report it rather than adjusting the budget.
 
 - [ ] **Step 8: Commit**
 
@@ -621,8 +596,8 @@ git commit -m "feat: transcode amazonHiuJin syllable audio to 48kbps mono mp3"
 - Consumes: nothing.
 - Produces:
   - `normalize(text: string): string`
-  - `isSimplified(text: string): boolean`
-  - `toTraditional(text: string): Promise<string>`
+  - `isSimplified(text: string): Promise<boolean>` — **async.** Detects by round-tripping through opencc and comparing, not by a character list. A hand-written marker set was tried first and measured at an 88% miss rate with false positives on ordinary Traditional words (電台, 只是, 方向); it was deleted rather than repaired.
+  - `toTraditional(text: string): Promise<string>` — idempotent on Traditional input.
   - `toSimplified(text: string): Promise<string>`
   - `scriptVariants(query: string): Promise<string[]>` — 1 or 2 deduped variants for search fan-out.
 
@@ -1482,7 +1457,7 @@ import type { SongCandidate } from '../types'
 
 export { RateLimitError }
 
-const key = (c: SongCandidate) => `${c.title} ${c.artist}`.toLowerCase()
+const key = (c: SongCandidate) => `${c.title}${c.artist}`.toLowerCase()
 
 /**
  * LRCLIB and iTunes both do zero query-time script folding, so a Simplified
@@ -1849,11 +1824,15 @@ function harness() {
   return { player, played, advance }
 }
 
+// start() awaits unlock() then prefetch(), so a single `await flush()`
+// does NOT reliably get past both. Drain the whole microtask queue instead.
+const flush = () => new Promise((r) => setTimeout(r, 0))
+
 describe('player', () => {
   it('schedules every syllable of a line in order', async () => {
     const { player, played, advance } = harness()
     player.playLine(line(['ngo5'], ['dei6']))
-    await Promise.resolve()
+    await flush()
     advance(1)
     expect(played.map((p) => p.s)).toEqual(['ngo5', 'dei6'])
   })
@@ -1861,7 +1840,7 @@ describe('player', () => {
   it('spaces syllables by clip duration plus the in-line gap', async () => {
     const { player, played, advance } = harness()
     player.playLine(line(['ngo5'], ['dei6']))
-    await Promise.resolve()
+    await flush()
     advance(1)
     expect(played[1].when - played[0].when).toBeCloseTo(0.4 + 0.12, 5)
   })
@@ -1870,7 +1849,7 @@ describe('player', () => {
     const { player, played, advance } = harness()
     player.setInterLineGap(1.0)
     player.playAll([line(['ngo5']), line(['dei6'])])
-    await Promise.resolve()
+    await flush()
     advance(5)
     expect(played[1].when - played[0].when).toBeCloseTo(0.4 + 1.0, 5)
   })
@@ -1878,7 +1857,7 @@ describe('player', () => {
   it('plays every syllable of a multi-syllable character', async () => {
     const { player, played, advance } = harness()
     player.playLine({ tokens: [{ chars: [{ char: '瓩', syllables: ['cin1', 'ngaa5'] }] }] })
-    await Promise.resolve()
+    await flush()
     advance(1)
     expect(played.map((p) => p.s)).toEqual(['cin1', 'ngaa5'])
   })
@@ -1888,7 +1867,7 @@ describe('player', () => {
     player.playLine({
       tokens: [{ chars: [{ char: '唱', syllables: ['coeng3'] }, { char: '，', syllables: [] }] }],
     })
-    await Promise.resolve()
+    await flush()
     advance(1)
     expect(played).toHaveLength(1)
   })
@@ -1896,7 +1875,7 @@ describe('player', () => {
   it('stop() halts further scheduling and reports not playing', async () => {
     const { player, played, advance } = harness()
     player.playAll([line(['a1']), line(['b1']), line(['c1'])])
-    await Promise.resolve()
+    await flush()
     player.stop()
     advance(10)
     expect(played.length).toBeLessThan(3)
@@ -1910,7 +1889,7 @@ describe('player', () => {
     const seen: number[] = []
     player.subscribe((s) => seen.push(s.lineIndex))
     player.playAll([line(['a1']), line(['b1'])])
-    await Promise.resolve()
+    await flush()
     advance(5)
     expect(seen).toContain(1)
   })
@@ -2238,7 +2217,7 @@ const lines = [{
 const dict = createDict({ '唱歌': 'to sing a song' })
 
 const engine = () => ({
-  unlock: vi.fn(async () => {}), has: () => true,
+  unlock: vi.fn(async () => {}), has: (_s: string) => true, duration: () => 0.4,
   load: vi.fn(async () => null), prefetch: vi.fn(async () => {}), play: vi.fn(() => 0.4),
 })
 
@@ -2763,8 +2742,14 @@ export default function App() {
     const out: Line[] = []
     for (const l of raw) {
       // Never feed Simplified to to-jyutping — it fails silently on mergers.
+      // toTraditional is NOT idempotent on Traditional input — it still
+      // normalises glyph variants (e.g. it can rewrite a word's characters
+      // to a different, equally-Traditional spelling), so Traditional
+      // lyrics must pass through untouched rather than being run through
+      // conversion. Detect first, and only convert text that is actually
+      // Simplified.
       let text = normalize(l.text)
-      if (isSimplified(text)) text = await toTraditional(text)
+      if (await isSimplified(text)) text = await toTraditional(text)
       // Annotate the WHOLE line. A break inside a word changes the reading.
       out.push({
         tokens: annotateLine(text, { words: dict.keys(), maxWordLength: dict.maxKeyLength }),

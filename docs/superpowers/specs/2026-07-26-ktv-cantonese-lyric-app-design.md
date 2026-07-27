@@ -168,6 +168,13 @@ Therefore:
 1. **Every search issues both script variants** to both iTunes and LRCLIB, then merges and dedupes.
 2. `opencc-js` moves onto the critical path — lazy-loaded on first search (~440 KB gzip for `cn2t`),
    not at boot.
+   **Detection is done by round-tripping through opencc and comparing, never by a character list.**
+   A hand-written "Simplified-only" marker set was implemented first and measured: **88% miss rate**
+   (it failed on 学, 说, 这, 时, 电, 见, 来, 对, 会) *and* false positives on ordinary Traditional
+   words, because 向 is script-neutral and 只/台 are the standard HK Traditional forms — so 電台,
+   舞台, 平台, 只是, 只有 and 方向 were all misclassified. The round-trip is exact and measured at
+   100% detection with zero false positives. This makes `isSimplified` async, which is fine: every
+   caller is already async.
 3. **Simplified text must never reach the Jyutping engine.** It fails *silently and confidently* on
    merger characters: 萝卜 → `buk1` instead of `baak6`; 忧郁 → `juk1` instead of `wat1`; 干部 →
    `gon1` instead of `gon3`. Roughly 6 of 20 tested merger cases fail. Convert to Traditional first.
@@ -329,17 +336,77 @@ directly above the character**, which is the property that matters for study.
 **Source: CC-CEDICT + CC-Canto, merged at build time. Both, not either.**
 **Packaging: one plain, eagerly-loaded, gzipped JSON. No sharding, no IndexedDB, no WASM.**
 
-Restrict the merged gloss map to `to-jyutping`'s own 48,262-word vocabulary — the segmenter can never
-emit anything outside it — and cap each gloss at ~40 characters:
+**Cap headwords at 2 characters** and cap each gloss at ~40 characters. **CC-CEDICT is loaded first**;
+CC-Canto fills only the keys CC-CEDICT lacks; a hand-curated override list is applied last and wins
+over both. See "Source ordering" below — the obvious choice turned out to be the wrong one.
 
-| | entries | raw | gzip |
+The strategy comparison that settled the cap (measured 2026-07-26, **before** the noise filter described
+under "Source ordering" below, so these figures are for choosing between strategies, not the shipped size):
+
+| Strategy | entries | gzip | grouping quality |
 |---|---|---|---|
-| CC-CEDICT source | 124,733 | 9,824,344 B | — |
-| Merged ∩ to-jyutping, ≤40-char gloss | 18,932 | 572,279 B | **245,397 B** |
+| Characters only | 10,366 | 107 KB | none — no keys to segment against |
+| **Headwords ≤ 2 chars** | **77,122** | **981 KB** | clean on every test sentence |
+| Headwords ≤ 3 chars | 106,995 | 1,448 KB | identical to ≤2 |
+| Everything (≤ 6 chars) | 134,383 | 1,966 KB | over-groups 4-char phrases |
 
-**~0.25 MB gzip, measured** on the actual built artifact. **98.8% coverage of token instances**,
-measured against a 63,346-character Canto-pop corpus. For context, `to-jyutping` itself is 273 KB
-gzip — the dictionary is smaller than the library it annotates.
+**As shipped: 76,964 entries, 983,920 B gzip (~961 KB).** The small drop from 77,122 is the noise filter
+removing headwords whose only gloss was a surname or bound-form pointer — those have no learner value,
+so dropping them is correct rather than lossy.
+
+### Correction: the original 245 KB figure was wrong
+
+The first version of this spec specified "restrict to `to-jyutping`'s 48,262-word vocabulary →
+18,932 entries, 245 KB", attributed to research as *measured*. **That is not reproducible and the
+approach is not implementable as described.** `src/trie.txt` is a custom-encoded binary trie on a
+single line, not a word list, so there is no cheap headword extraction; and a check of the form
+"every character has a non-null reading" is a no-op, because `getJyutpingList` returns a reading for
+essentially any Han character (it accepted 99.7% of candidate keys when measured). The table above
+replaces that figure with directly measured alternatives.
+
+### Why ≤2 rather than the full set
+
+Most Chinese compounds are two characters, so the cap costs almost nothing in grouping quality and
+halves the payload. It also *improves* segmentation: greedy longest-match over the unrestricted set
+collapses 愛情故事 into one opaque unit, where the capped set yields 愛情 · 故事 — the better unit for
+a learner. The cost is that genuine three- and four-character set phrases split into parts; their
+component characters still gloss, so nothing is left undefined, but the idiom boundary is lost.
+
+**CC-Canto alone was evaluated and rejected** (33,109 entries, 479 KB). It is a colloquial
+*supplement*, not a general dictionary: it covers 我哋, 佢嘅, 入面, 落嚟 well but strands ordinary
+compounds like 時間, 流逝, 記憶, 片段 and 眼淚 as loose single characters. It bought visibly worse
+grouping than the option costing twice as much.
+
+### Source ordering — measured, and the reverse of the intuitive choice
+
+This spec originally specified **CC-Canto first**, reasoning that its Cantonese senses should beat
+CC-CEDICT's Mandarin ones (CC-CEDICT glosses 睇 as "to cast a sidelong glance"). Measurement showed
+that ordering is worse overall, and the reasoning was already obsolete: every colloquial character it
+was meant to rescue is in `overrides.json`, which is applied last and wins regardless.
+
+Measured across the 45 most frequent Chinese characters, both orderings produce **identical** glosses
+for every colloquial test word (佢, 嘅, 冇, 睇, 我哋, 入面, 落嚟, 時間, 愛情) — but CC-Canto-first
+degrades common characters badly: 去 → "passed away", 中 → "(dialect) OK", 上 → "8. to climb",
+會 → "(noun) 1. seminar; 2. meeting; 3.".
+
+**The root cause was not ordering.** Both sources list unhelpful senses first for common characters,
+so taking the first slash-segment of the first matching row yields garbage either way. CC-CEDICT-first
+alone produced 也 → "surname Ye", 時 → "surname Shi", 以 → "abbr. for Israel". The fix is a
+**fall-through filter**: rows whose leading sense matches `^surname `, `^used in `, `^abbr. for `,
+`^variant of `, `^see `, `^CL:` or exactly `(bound form)` yield no gloss, so the *next* row for that
+headword supplies one. With that filter, CC-CEDICT-first is correct on all 45 probed characters and
+is 12 KB smaller. Final: **76,964 entries, 961 KB gzip.**
+
+Two further data traps, both found by review rather than by design:
+
+- **CC-Canto's line format has a trailing-comment variant.** 8,882 of its 34,347 lines (25.9%) end
+  with `# adapted from cc-cedict` after the closing `/`. A parser anchored to end-of-line after the
+  gloss drops all of them, and 4,349 single characters then silently fall back to CC-CEDICT's Mandarin
+  sense — the exact failure the ordering was meant to prevent.
+- **CC-Canto packs numbered senses into one segment**, so naive truncation yields fragments like
+  `(noun) 1. seminar; 2. meeting; 3.`. Keep the part-of-speech tag and the first sense only. The
+  enumerator must be matched as `\d+\.` **followed by whitespace** — otherwise `2.5 times more`
+  becomes `5 times more`, silently changing meaning.
 
 ### Neither source works alone
 
@@ -356,7 +423,8 @@ the highest quality-per-byte item in the entire app.
 ### Build step
 
 1. Fetch `cedict_1_0_ts_utf-8_mdbg.txt.gz` and `cccanto-170202.zip`; parse the shared
-   `TRAD SIMP [pinyin] {jyutping}? /gloss/` format.
+   `TRAD SIMP [pinyin] {jyutping}? /gloss/` format, **accepting an optional trailing `#` comment**.
+   Load **CC-CEDICT first**; CC-Canto then fills only the keys it lacks.
 2. **Do not collapse CC-Canto rows onto CC-CEDICT headwords.** Merge only on
    `(trad, simp, normalized-pinyin)` *and* absent jyutping; otherwise append as a separate entry.
    Matching on `(trad, simp)` alone resolves only 4 of 2,456 collisions (0.2%).
@@ -365,7 +433,8 @@ the highest quality-per-byte item in the entire app.
 4. Handle the 65 lines with slashes inside `{}` and the one known malformed entry.
 5. Apply the hand-curated override list last; truncate to ≤40 chars; strip `CL:` and
    `Mandarin equivalent:` noise.
-6. Intersect with `to-jyutping`'s vocabulary; emit one gzipped JSON plus a `LICENSE-ATTRIBUTION` file.
+6. Drop headwords longer than 2 characters; emit one JSON plus an attribution file. Fail the build
+   above a 1.2 MB gzip budget.
 7. Runtime: per-character decomposition fallback for the ~1.2% of tapped tokens with no entry.
 
 ### Rejected alternatives
@@ -557,7 +626,8 @@ Stated plainly rather than papered over.
 | `cantone`'s MIT tag over vendor-synthesized audio | **Accepted with mitigation** — `amazonHiuJin` only; Polly self-generation is the clean upgrade |
 | Overlap between the trie's syllable set and `amazonHiuJin`'s 3,885 | **Unmeasured.** Build-time assertion will enumerate the gap |
 | Our longest-match grouping vs the trie's internal segmentation | **Will diverge somewhere; unmeasured how often.** Accepted: the divergence is cosmetic only, never a wrong reading (§6) |
-| How sparse word grouping looks with an 18,932-key dictionary | **Unmeasured.** If too sparse, the fallback is extracting the full 48,262-entry word list from `to-jyutping`'s `src/trie.txt` at build time |
+| How sparse word grouping looks | **Measured 2026-07-26** on five synthetic Canto-pop-style sentences: the ≤2-char dictionary grouped every one correctly. Not measured against a real lyric corpus |
+| The 245 KB dictionary figure from research | **Refuted.** See §8. Two other research figures carry the same provenance and remain unverified: the audio coverage gap (Task 3 asserts it at build time) and the 95–99% romanization accuracy (never verified) |
 | Hand-curated colloquial override list (~4 KB) | **Estimated.** The list does not exist yet |
 | Dual-keying the dictionary for Simplified (~+270 KB gzip) | **Estimated, not remeasured post-intersection.** Traditional-only keying left 86 of 1,322 lyric characters unglossed, all Simplified — so opencc-js is load-bearing either way |
 | GitHub Pages/Fastly gzip level vs local `gzip -9` | **Unmeasured.** Expect a few percent worse |
