@@ -340,6 +340,9 @@ directly above the character**, which is the property that matters for study.
 CC-Canto fills only the keys CC-CEDICT lacks; a hand-curated override list is applied last and wins
 over both. See "Source ordering" below — the obvious choice turned out to be the wrong one.
 
+The strategy comparison that settled the cap (measured 2026-07-26, **before** the noise filter described
+under "Source ordering" below, so these figures are for choosing between strategies, not the shipped size):
+
 | Strategy | entries | gzip | grouping quality |
 |---|---|---|---|
 | Characters only | 10,366 | 107 KB | none — no keys to segment against |
@@ -347,7 +350,9 @@ over both. See "Source ordering" below — the obvious choice turned out to be t
 | Headwords ≤ 3 chars | 106,995 | 1,448 KB | identical to ≤2 |
 | Everything (≤ 6 chars) | 134,383 | 1,966 KB | over-groups 4-char phrases |
 
-**76,964 entries, 983,920 B gzip (~961 KB). Measured locally with `gzip -9`** against the real sources on 2026-07-26.
+**As shipped: 76,964 entries, 983,920 B gzip (~961 KB).** The small drop from 77,122 is the noise filter
+removing headwords whose only gloss was a surname or bound-form pointer — those have no learner value,
+so dropping them is correct rather than lossy.
 
 ### Correction: the original 245 KB figure was wrong
 
