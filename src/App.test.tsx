@@ -206,6 +206,10 @@ const YUE_UNDER_CMN = ['tīn', 'hūng']
 // ...and the mirror: pinyin keys rendered through the Cantonese pack, whose
 // default style is the identity function, so the raw tone NUMBER shows.
 const CMN_UNDER_YUE = ['tian1', 'kong1']
+// A second phrase, to tell "the song you picked" from "the song you were
+// already looking at". 你好 is `nei5 hou2` / `nǐ hǎo`.
+const YUE_NEI = 'nei5'
+const CMN_NI = 'nǐ'
 
 async function pasteLyric(user: ReturnType<typeof userEvent.setup>, text: string) {
   await user.click(screen.getByText(/paste lyrics manually/i))
@@ -438,6 +442,134 @@ describe('language toggle', () => {
     } finally {
       spy.mockRestore()
     }
+  })
+
+  // --- Generation ordering across the language switch (fix round 1) ---
+  //
+  // The language switch awaits a 288 kB lazy chunk, and SearchBar is NOT
+  // disabled while it does (only the toggle is). So a pick can begin, and
+  // finish, entirely inside a switch that is still in flight. The switch is
+  // therefore the OLDER action and must lose -- which only holds if it takes
+  // its generation at entry, like every other action, rather than bumping
+  // after its await.
+
+  // Stalls the lazy pack import so the window between "switch started" and
+  // "switch resolved" is wide enough to drive a whole pick through.
+  async function stallGetPack(ms = 150) {
+    const lang = await import('./lang')
+    const real = lang.getPack
+    return vi.spyOn(lang, 'getPack').mockImplementation(async (id) => {
+      await new Promise((r) => setTimeout(r, ms))
+      return real(id)
+    })
+  }
+
+  it('a pick started during a language switch wins, and the switch does not strand busy', async () => {
+    vi.mocked(searchSongs).mockResolvedValue([{ title: 'Song A', artist: 'Artist' }])
+    const lyrics = deferred<{ raw: { text: string; timeMs?: number }[]; lrclibId?: number } | null>()
+    vi.mocked(fetchLyrics).mockReturnValue(lyrics.promise)
+
+    const spy = await stallGetPack()
+    try {
+      const user = userEvent.setup()
+      render(<App />)
+      await pasteLyric(user, '天空')
+      await screen.findByText(YUE_TIN, {}, { timeout: 3000 })
+
+      await user.type(screen.getByRole('searchbox'), '歌')
+      await screen.findByRole('button', { name: /Song A/ }, { timeout: 3000 })
+
+      // fireEvent: start each action WITHOUT awaiting it.
+      fireEvent.click(screen.getByRole('button', { name: /普通話/ }))
+      fireEvent.click(screen.getByRole('button', { name: /Song A/ }))
+
+      // Let the stalled getPack resolve while the pick is still awaiting its
+      // lyrics. This is the whole race: the older switch completes second.
+      await new Promise((r) => setTimeout(r, 300))
+      lyrics.resolve({ raw: [{ text: '你好' }], lrclibId: 31 })
+
+      // The song the user actually chose must be what renders.
+      expect(await screen.findByText(YUE_NEI, {}, { timeout: 3000 })).toBeInTheDocument()
+      // ...and the previous song must not have been re-annotated over it.
+      expect(screen.queryByText(YUE_TIN)).toBeNull()
+      expect(screen.queryByText(CMN_TIAN)).toBeNull()
+
+      // A stranded `busy` leaves "Searching…" (role=status) up forever.
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull(), { timeout: 2000 })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('a superseded pick does not move the toggle away from the language on screen', async () => {
+    vi.mocked(searchSongs).mockResolvedValue([
+      { title: 'Song A', artist: 'Artist', genre: 'Mandopop', langGuess: 'cmn' },
+      { title: 'Song B', artist: 'Artist' },
+    ])
+    vi.mocked(fetchLyrics).mockImplementation(async (c) =>
+      (c.title === 'Song A'
+        ? { raw: [{ text: '天空' }], lrclibId: 41 }
+        : { raw: [{ text: '你好' }], lrclibId: 42 }))
+
+    const spy = await stallGetPack(300)
+    try {
+      const user = userEvent.setup()
+      render(<App />)
+
+      await user.type(screen.getByRole('searchbox'), '歌')
+      await screen.findByRole('button', { name: /Song A/ }, { timeout: 3000 })
+
+      // A wants Mandarin and stalls inside getPack; B wants nothing in
+      // particular and sails past it, so B lands first and wins.
+      fireEvent.click(screen.getByRole('button', { name: /Song A/ }))
+      // Wait until A is provably INSIDE the stall before starting B. Clicking
+      // both back-to-back does not reproduce the race at all: A would bail at
+      // its own post-fetchLyrics generation check and never reach selectPack,
+      // and the test would pass against the bug it exists to catch.
+      await waitFor(() => expect(spy).toHaveBeenCalledWith('cmn'), { timeout: 3000 })
+      fireEvent.click(screen.getByRole('button', { name: /Song B/ }))
+
+      expect(await screen.findByText(YUE_NEI, {}, { timeout: 3000 })).toBeInTheDocument()
+
+      // Now let A's getPack resolve. A has already lost, so it must not
+      // move the toggle: `view` stays coherent either way, but a toggle
+      // reading 普通話 over a Jyutping lyric is a control that lies.
+      await new Promise((r) => setTimeout(r, 300))
+
+      expect(screen.getByRole('button', { name: /粵語/ })).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByRole('button', { name: /普通話/ })).toHaveAttribute('aria-pressed', 'false')
+      expect(screen.getByText(YUE_NEI)).toBeInTheDocument()
+      expect(screen.queryByText(CMN_NI)).toBeNull()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  // The same stranded-`busy` failure mode as the first test above, reached
+  // without the language toggle at all: PasteBox is never disabled, so a
+  // paste can supersede an in-flight pick. Pre-existing, but it is the same
+  // line of code and the same user-visible symptom.
+  it('a paste that supersedes an in-flight pick does not strand busy', async () => {
+    vi.mocked(searchSongs).mockResolvedValue([{ title: 'Song A', artist: 'Artist' }])
+    const lyrics = deferred<{ raw: { text: string; timeMs?: number }[]; lrclibId?: number } | null>()
+    vi.mocked(fetchLyrics).mockReturnValue(lyrics.promise)
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByRole('searchbox'), '歌')
+    await screen.findByRole('button', { name: /Song A/ }, { timeout: 3000 })
+    await user.click(screen.getByRole('button', { name: /Song A/ }))
+    expect(screen.getByRole('status')).toBeInTheDocument() // "Searching…"
+
+    // Give up waiting and paste instead -- which is exactly what the paste
+    // box is there for.
+    await pasteLyric(user, '你好')
+    expect(await screen.findByText(YUE_NEI, {}, { timeout: 3000 })).toBeInTheDocument()
+
+    lyrics.resolve({ raw: [{ text: '天空' }], lrclibId: 51 })
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull(), { timeout: 2000 })
+    expect(screen.getByText(YUE_NEI)).toBeInTheDocument()
   })
 
   it('seeds the toggle from the candidate langGuess on pick', async () => {

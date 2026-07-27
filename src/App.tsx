@@ -133,6 +133,10 @@ export default function App() {
   // it, not with whatever the toggle happens to say by the time it runs.
   const pendingRef = useRef<{ raw: SourceLine[]; pack: LanguagePack; gen: number } | null>(null)
 
+  // The generation of the pick that most recently raised `busy`. See the
+  // ownership argument in onPick's `finally` below.
+  const busyPickRef = useRef(0)
+
   useEffect(() => { loadDict().then(setDict).catch(() => setNotice('Dictionary failed to load')) }, [])
   useEffect(() => {
     const unsubscribe = player.subscribe(setPstate)
@@ -253,16 +257,29 @@ export default function App() {
    *
    * Deliberately does NOT re-annotate: onPick needs the pack for a lyric it
    * is ABOUT to annotate, not for the one currently on screen.
+   *
+   * Takes its caller's generation because it commits state (`setPack`,
+   * `setNotice`) of its own, across an await, BEFORE the caller gets control
+   * back to run its own generation check. Checking here is the only place
+   * that can stop a superseded action from moving the toggle.
    */
-  const selectPack = useCallback(async (next: LangId | undefined): Promise<LanguagePack> => {
+  const selectPack = useCallback(async (
+    next: LangId | undefined, gen: number,
+  ): Promise<LanguagePack> => {
     if (!next || next === pack.id) return pack
     try {
       const p = await getPack(next)
+      // Don't move the toggle on behalf of an action that has already lost.
+      // `view` stays coherent either way -- lines and pack are one object --
+      // but the CONTROL would advertise a language that nothing on screen is
+      // annotated in, and only a further tap would recover it.
+      if (gen !== genRef.current) return pack
       setPack(p)
       return p
     } catch {
       // A lazy chunk fetch can fail offline. getPack clears its own memo on
       // failure, so a later retry is not permanently poisoned.
+      if (gen !== genRef.current) return pack
       setNotice('Could not load that language. Check your connection and try again.')
       return pack
     }
@@ -272,15 +289,25 @@ export default function App() {
   // view. No network, no refetch -- the cache holds raw text precisely so
   // this is a pure recompute.
   const onLangChange = useCallback(async (next: LangId) => {
+    // Take the generation at ENTRY, exactly like onPick and onPaste. Bumping
+    // it after the getPack await instead would make this switch SUPERSEDE
+    // any pick the user began while the 288 kB Mandarin chunk was still
+    // downloading -- and they can: packBusy disables the toggle, but nothing
+    // disables SearchBar. The switch is the OLDER action and must lose.
+    genRef.current++
+    const gen = genRef.current
     setPackBusy(true)
     setNotice(null)
     try {
-      const p = await selectPack(next)
+      const p = await selectPack(next, gen)
+      if (gen !== genRef.current) return // a pick/paste started meanwhile has won
       if (p.id !== next) return // the switch failed; selectPack already said so
       if (rawRef.current.length === 0) return
-      genRef.current++
-      await annotate(rawRef.current, p, genRef.current)
+      await annotate(rawRef.current, p, gen)
     } finally {
+      // NOT gated on the generation, unlike `busy` below: onLangChange is the
+      // only writer of packBusy, so a superseded switch that declined to
+      // clear it would disable the toggle permanently.
       setPackBusy(false)
     }
   }, [annotate, selectPack])
@@ -302,7 +329,8 @@ export default function App() {
   const onPick = useCallback(async (c: SongCandidate) => {
     genRef.current++
     const gen = genRef.current
-    setBusy(true); setNotice(null)
+    setBusy(true); busyPickRef.current = gen
+    setNotice(null)
     try {
       // Finding 4: a SongCandidate never carries LRCLIB's id (that's only
       // learned from the fetch below), so title+artist is the only key
@@ -323,7 +351,7 @@ export default function App() {
         // switching the language and rendering this song are one step, not
         // two, so the cached lyric is never shown under the wrong pack (and
         // the previous song's lines are never re-annotated in its place).
-        const p = await selectPack(c.langGuess ?? cached.langGuess)
+        const p = await selectPack(c.langGuess ?? cached.langGuess, gen)
         if (gen !== genRef.current) return
         await annotate(cached.raw, p, gen)
         return
@@ -333,7 +361,7 @@ export default function App() {
       if (gen !== genRef.current) return // superseded by a later pick
       if (!result) { setNotice('No lyrics found for that track. Paste them below to continue.'); return }
 
-      const p = await selectPack(c.langGuess)
+      const p = await selectPack(c.langGuess, gen)
       if (gen !== genRef.current) return
 
       const out = await annotate(result.raw, p, gen)
@@ -363,9 +391,17 @@ export default function App() {
           : 'Lyric lookup failed. Paste the lyrics below to continue.',
       )
     } finally {
-      // Only the latest pick may clear `busy` -- a stale pick's finally
-      // must not flip it false out from under a newer pick still in flight.
-      if (gen === genRef.current) setBusy(false)
+      // Only the latest PICK may clear `busy` -- a stale pick's finally must
+      // not flip it false out from under a newer pick still in flight.
+      //
+      // Gated on ownership, not on `gen === genRef.current`. `busy` belongs
+      // exclusively to onPick, but genRef is bumped by onPaste and
+      // onLangChange too, and neither of those ever clears `busy`. Gating on
+      // the raw generation therefore stranded it at true -- a permanent
+      // "Searching…" in SearchBar -- whenever a non-pick action superseded a
+      // pick, which a paste can do at any time since PasteBox is never
+      // disabled. busyPickRef records which pick actually put it up.
+      if (busyPickRef.current === gen) setBusy(false)
     }
   }, [annotate, selectPack])
 
