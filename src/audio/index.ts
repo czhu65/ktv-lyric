@@ -66,9 +66,20 @@ export function createAudioEngine(
   // Shared/memoised across concurrent callers, and NOT memoised on failure
   // (mirrors src/dict/index.ts) so a transient network blip doesn't
   // permanently strand has()/duration() on "assume everything is available".
+  //
+  // A 404 is treated as "this bank does not exist" rather than "the network
+  // failed" -- e.g. the Mandarin pack before its audio bank has been built
+  // (see Task 16's amendment). That resolves successfully with an EMPTY
+  // Set, not null: has() must settle to false for every syllable so every
+  // character renders the existing per-character "no audio" marker, rather
+  // than silently treating the missing bank as "unknown -> available" or
+  // surfacing the generic network-failure notice for something that isn't
+  // broken. Any other failure (500, network error, ...) still rejects and
+  // is NOT memoised, so a retry is possible.
   function loadManifest(): Promise<void> {
     manifestPromise ??= fetch(`${base}${manifest}`)
       .then((r) => {
+        if (r.status === 404) return []
         if (!r.ok) throw new Error(`${manifest} -> HTTP ${r.status}`)
         return r.json() as Promise<Syllable[]>
       })

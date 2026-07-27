@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { normalizePinyinSyllable } from './pinyin-syllable'
 import { pinyin } from 'pinyin-pro'
+// @ts-expect-error -- plain ESM build script, no .d.ts
+import { normalizeSyllable } from '../../scripts/lib/pinyin-inventory.mjs'
 
 describe('normalizePinyinSyllable', () => {
   it('passes through a well-formed toned syllable', () => {
@@ -46,5 +48,17 @@ describe('normalizePinyinSyllable against pinyin-pro itself', () => {
     const out = raw.map(normalizePinyinSyllable)
     expect(out.every((s) => s !== null)).toBe(true)
     expect(out.every((s) => /^[a-z]+[0-4]$/.test(s as string))).toBe(true)
+  })
+})
+
+// The normalizer exists twice -- here for the app, and in
+// scripts/lib/pinyin-inventory.mjs for the build script (which cannot
+// import TypeScript). If the two diverge, the audio bank and the annotator
+// key syllables differently and every affected character goes silent.
+describe('the build-script normalizer agrees with the app normalizer', () => {
+  it('agrees on every interesting input', () => {
+    for (const raw of ['wo3', 'de5', 'de', 'lü4', 'lu:4', 'LV4', 'wo7', '', 'abc!']) {
+      expect(normalizeSyllable(raw)).toBe(normalizePinyinSyllable(raw))
+    }
   })
 })

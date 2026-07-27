@@ -4,7 +4,11 @@
 // (dictionary rebuild, syllable manifest, etc.) -- this is cache-first with
 // no revalidation, so a stale name means returning users never see the new
 // data, even after a hard refresh.
-const CACHE = 'ktv-lyric-audio-v1'
+//
+// Bumped to v2 for the Mandarin bank (/audio/pin/): the activate handler
+// below deletes every cache whose key differs from CACHE, so the bump is
+// what evicts stale v1 entries rather than leaving them to accumulate.
+const CACHE = 'ktv-lyric-audio-v2'
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
@@ -15,7 +19,10 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url)
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return
-  const cacheable = url.pathname.includes('/audio/syl/') || url.pathname.includes('/data/')
+  const cacheable =
+    url.pathname.includes('/audio/syl/') ||
+    url.pathname.includes('/audio/pin/') ||
+    url.pathname.includes('/data/')
   if (!cacheable) return
 
   event.respondWith(

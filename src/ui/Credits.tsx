@@ -13,9 +13,15 @@ export default function Credits() {
         under CC BY-SA 4.0.
       </p>
       <p>
-        Pronunciation audio from <a href="https://huggingface.co/datasets/AlienKevin/cantone">AlienKevin/cantone</a>{' '}
-        (MIT), amazonHiuJin voice. Lyrics fetched at runtime from{' '}
+        Cantonese pronunciation audio from{' '}
+        <a href="https://huggingface.co/datasets/AlienKevin/cantone">AlienKevin/cantone</a> (MIT),
+        amazonHiuJin voice. Lyrics fetched at runtime from{' '}
         <a href="https://lrclib.net/">LRCLIB</a> and never stored by this site.
+      </p>
+      <p>
+        Pinyin readings from <a href="https://github.com/zh-lx/pinyin-pro">pinyin-pro</a> (MIT).
+        Mandarin pronunciation audio is not yet available — Mandarin lyrics currently display
+        pinyin and glosses only, with no tap-to-hear playback.
       </p>
       <p>A free, non-commercial study tool.</p>
     </footer>

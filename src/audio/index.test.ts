@@ -63,15 +63,45 @@ describe('AudioEngine', () => {
     expect(e.has('zzz9')).toBe(false)
   })
 
-  // --- Finding 3: a manifest fetch that 404s (or similar) must be treated
+  // --- Finding 3: a manifest fetch that is genuinely not-ok must be treated
   // as a failure -- not silently `.json()`-parsed into garbage -- and must
   // not be memoised, so a later retry can still succeed. Mirrors
-  // src/dict/index.ts's loadDict() handling of the identical failure mode. ---
+  // src/dict/index.ts's loadDict() handling of the identical failure mode.
+  // Uses 500, not 404: since the Task 16 amendment, 404 has its own
+  // deliberate "no bank yet" meaning and must NOT reject -- see below. ---
 
   it('unlock() rejects when the manifest fetch is not ok, instead of silently parsing an error body', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('server error', { status: 500 })))
+    const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
+    await expect(e.unlock()).rejects.toThrow(/500/)
+  })
+
+  // --- Task 16 amendment: a missing manifest (404) means "this bank simply
+  // doesn't exist yet" (e.g. Mandarin before its audio bank is built), not
+  // "the network failed". It must degrade quietly -- resolve, not reject --
+  // with has() settling to false for every syllable so the per-character
+  // "no audio" marker takes over instead of an error notice. Any other
+  // failure (500, etc.) must keep rejecting exactly as before. ---
+
+  it('unlock() resolves (does not reject) when the manifest 404s, treating it as "no bank yet"', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>not found</html>', { status: 404 })))
     const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
-    await expect(e.unlock()).rejects.toThrow(/404/)
+    await expect(e.unlock()).resolves.toBeUndefined()
+  })
+
+  it('has() is false for every syllable once a 404 manifest has resolved -- an empty Set, not "unknown"', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
+    const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
+    expect(e.has('anything')).toBe(true) // still unknown before unlock() settles
+    await e.unlock()
+    expect(e.has('anything')).toBe(false) // now known: empty, not null
+    expect(e.has('coeng3')).toBe(false)
+  })
+
+  it('unlock() still rejects on a genuine failure (500), not just resolving quietly', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('server error', { status: 500 })))
+    const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
+    await expect(e.unlock()).rejects.toThrow(/500/)
   })
 
   it('retries after a failed manifest load, succeeding on the second call', async () => {
@@ -79,7 +109,7 @@ describe('AudioEngine', () => {
       'fetch',
       vi
         .fn()
-        .mockResolvedValueOnce(new Response('', { status: 404 }))
+        .mockResolvedValueOnce(new Response('server error', { status: 500 }))
         .mockImplementationOnce(async () => new Response(JSON.stringify(['coeng3', 'go1']))),
     )
     const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
