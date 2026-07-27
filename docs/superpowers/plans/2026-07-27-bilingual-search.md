@@ -1232,6 +1232,22 @@ Replace the `batches` computation with a fan-out over both dimensions:
 ```ts
   const jobs = variants.flatMap((v) => STOREFRONTS.map((c) => ({ v, c })))
 
+  // The LRCLIB fallback is keyed by SCRIPT VARIANT, not by job. Both the HK
+  // and TW jobs for one variant would otherwise issue the identical
+  // lrclibSearch(v) request -- and they fail together precisely when iTunes
+  // is down as a whole, which is exactly when doubling load on LRCLIB is most
+  // likely to trip its rate limiter. Sharing the promise makes the fallback
+  // fire once per variant no matter how many storefronts fan out over it.
+  const fallbacks = new Map<string, Promise<SongCandidate[]>>()
+  const fallbackFor = (v: string) => {
+    let p = fallbacks.get(v)
+    if (!p) {
+      p = lrclibSearch(v)
+      fallbacks.set(v, p)
+    }
+    return p
+  }
+
   const batches = await Promise.all(
     jobs.map(async ({ v, c }) => {
       try {
@@ -1243,7 +1259,7 @@ Replace the `batches` computation with a fan-out over both dimensions:
         // is down, fall back to LRCLIB".
         if (err instanceof RateLimitError) throw err
         try {
-          return await lrclibSearch(v) // tier-1 fallback
+          return await fallbackFor(v) // tier-1 fallback, shared per variant
         } catch (fallbackErr) {
           // A 429 here is not an ordinary "this variant failed" -- there is
           // no server-side fallback beyond LRCLIB, so a rate limit must
