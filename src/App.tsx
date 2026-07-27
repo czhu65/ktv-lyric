@@ -7,6 +7,7 @@ import { loadDict, type Dict } from './dict'
 import { createAudioEngine } from './audio'
 import { createPlayer, type Player, type PlayerState } from './player'
 import { loadSettings, saveSettings, cacheLyric, getCachedLyricByTitleArtist, type Settings } from './storage'
+import { yuePack } from './lang'
 import type { Line, SongCandidate } from './types'
 import SearchBar from './ui/SearchBar'
 import PasteBox from './ui/PasteBox'
@@ -248,7 +249,7 @@ export default function App() {
 
         {lines.length > 0 && dict ? (
           <LyricView
-            lines={lines} dict={dict} engine={engine} settings={settings}
+            lines={lines} dict={dict} engine={engine} settings={settings} pack={yuePack}
             activeLine={pstate.lineIndex} activeChar={pstate.charIndex}
             audioReady={audioReady}
             onPlayLine={(i) => player.playLine(lines[i], i)}

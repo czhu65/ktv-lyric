@@ -2,6 +2,7 @@ import { memo } from 'react'
 import type { Line, Token } from '../types'
 import type { AudioEngine } from '../audio'
 import type { Settings } from '../storage'
+import type { LanguagePack } from '../lang/types'
 import { showRomanization } from '../romanize/show'
 
 export interface LyricLineProps {
@@ -9,6 +10,8 @@ export interface LyricLineProps {
   lineIndex: number
   engine: AudioEngine
   settings: Settings
+  /** Supplies the romanization styles and the audio bank identity. */
+  pack: LanguagePack
   /** True once the audio manifest has loaded. Gates the "no audio" marker
    *  below (see Finding 2): before the manifest loads, we don't yet know
    *  which syllables are missing, so nothing should be marked missing.
@@ -41,11 +44,11 @@ export function resetRenderCount(): void {
 }
 
 function LyricLineImpl(
-  { line, lineIndex, engine, settings, audioReady = true, activeCharInThisLine, onPlayLine, onTapChar }:
+  { line, lineIndex, engine, settings, pack, audioReady = true, activeCharInThisLine, onPlayLine, onTapChar }:
     LyricLineProps,
 ) {
   if (import.meta.env.DEV) renderCount++
-  const show = (s: string) => showRomanization(s, settings.romanization)
+  const show = (s: string) => showRomanization(s, pack, settings)
 
   let idx = 0 // accumulated across tokens/chars as we map, not re-sliced+reduced per character
   return (

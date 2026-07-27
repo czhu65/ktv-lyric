@@ -6,6 +6,8 @@ import { renderCount as lyricLineRenderCount, resetRenderCount as resetLyricLine
 import { createDict } from '../dict'
 import { createAudioEngine } from '../audio'
 import { DEFAULT_SETTINGS } from '../storage'
+import { cmnPack } from '../lang/cmn'
+import { yuePack } from '../lang/yue'
 
 // NOTE on 'coeng3' -> 'coeng1': the brief's fixture paired 唱 with tone 3 but
 // asserted the Yale output 'chēung' (a macron). Real Yale (see
@@ -31,7 +33,7 @@ const engine = () => ({
 
 const setup = (over: Record<string, unknown> = {}) => {
   const e = engine()
-  render(<LyricView lines={lines} dict={dict} engine={e} settings={DEFAULT_SETTINGS}
+  render(<LyricView lines={lines} dict={dict} engine={e} settings={DEFAULT_SETTINGS} pack={yuePack}
     activeLine={-1} activeChar={-1} onPlayLine={() => {}} {...over} />)
   return e
 }
@@ -94,7 +96,7 @@ describe('LyricView', () => {
   it('marks a character whose syllable has no audio', () => {
     const e = engine()
     e.has = (s: string) => s !== 'go1'
-    render(<LyricView lines={lines} dict={dict} engine={e} settings={DEFAULT_SETTINGS}
+    render(<LyricView lines={lines} dict={dict} engine={e} settings={DEFAULT_SETTINGS} pack={yuePack}
       activeLine={-1} activeChar={-1} onPlayLine={() => {}} />)
     expect(screen.getByRole('button', { name: /歌/ })).toHaveAttribute('data-noaudio', 'true')
     expect(screen.getByRole('button', { name: /唱/ })).not.toHaveAttribute('data-noaudio')
@@ -118,7 +120,7 @@ describe('LyricView', () => {
     }
     const realEngine = createAudioEngine(fakeCtx as unknown as BaseAudioContext)
 
-    render(<LyricView lines={lines} dict={dict} engine={realEngine} settings={DEFAULT_SETTINGS}
+    render(<LyricView lines={lines} dict={dict} engine={realEngine} settings={DEFAULT_SETTINGS} pack={yuePack}
       activeLine={-1} activeChar={-1} onPlayLine={() => {}} />)
 
     expect(screen.getByRole('button', { name: /唱/ })).not.toHaveAttribute('data-noaudio')
@@ -135,13 +137,13 @@ describe('LyricView', () => {
     const e = engine()
     e.has = (s: string) => s !== 'go1'
     const { rerender } = render(
-      <LyricView lines={lines} dict={dict} engine={e} settings={DEFAULT_SETTINGS}
+      <LyricView lines={lines} dict={dict} engine={e} settings={DEFAULT_SETTINGS} pack={yuePack}
         activeLine={-1} activeChar={-1} audioReady={false} onPlayLine={() => {}} />,
     )
     expect(screen.getByRole('button', { name: /歌/ })).not.toHaveAttribute('data-noaudio')
 
     rerender(
-      <LyricView lines={lines} dict={dict} engine={e} settings={DEFAULT_SETTINGS}
+      <LyricView lines={lines} dict={dict} engine={e} settings={DEFAULT_SETTINGS} pack={yuePack}
         activeLine={-1} activeChar={-1} audioReady onPlayLine={() => {}} />,
     )
     expect(screen.getByRole('button', { name: /歌/ })).toHaveAttribute('data-noaudio', 'true')
@@ -151,7 +153,7 @@ describe('LyricView', () => {
 
   it('renders a pure-punctuation line without crashing and without character buttons', () => {
     const punctLines = [{ tokens: [{ chars: [{ char: '…', syllables: [] }, { char: '！', syllables: [] }] }] }]
-    render(<LyricView lines={punctLines} dict={dict} engine={engine()} settings={DEFAULT_SETTINGS}
+    render(<LyricView lines={punctLines} dict={dict} engine={engine()} settings={DEFAULT_SETTINGS} pack={yuePack}
       activeLine={-1} activeChar={-1} onPlayLine={() => {}} />)
     // Only the line's own play button should be a button; no character is.
     expect(screen.getAllByRole('button')).toHaveLength(1)
@@ -161,7 +163,7 @@ describe('LyricView', () => {
 
   it('shows a graceful fallback when the tapped token has no dictionary entry', async () => {
     const noEntryLines = [{ tokens: [{ chars: [{ char: '氹', syllables: ['tam5'] }] }] }]
-    render(<LyricView lines={noEntryLines} dict={dict} engine={engine()} settings={DEFAULT_SETTINGS}
+    render(<LyricView lines={noEntryLines} dict={dict} engine={engine()} settings={DEFAULT_SETTINGS} pack={yuePack}
       activeLine={-1} activeChar={-1} onPlayLine={() => {}} />)
     await userEvent.click(screen.getByRole('button', { name: /氹/ }))
     expect(await screen.findByText('No definition available')).toBeInTheDocument()
@@ -213,13 +215,13 @@ describe('LyricView', () => {
     // renders -- only activeChar differs -- so a genuinely unaffected line
     // has every reason to bail out via React.memo.
     const { rerender } = render(
-      <LyricView lines={twoLines} dict={dict} engine={e} settings={DEFAULT_SETTINGS}
+      <LyricView lines={twoLines} dict={dict} engine={e} settings={DEFAULT_SETTINGS} pack={yuePack}
         activeLine={0} activeChar={0} onPlayLine={onPlayLine} />,
     )
     resetLyricLineRenderCount()
 
     rerender(
-      <LyricView lines={twoLines} dict={dict} engine={e} settings={DEFAULT_SETTINGS}
+      <LyricView lines={twoLines} dict={dict} engine={e} settings={DEFAULT_SETTINGS} pack={yuePack}
         activeLine={0} activeChar={1} onPlayLine={onPlayLine} />,
     )
 
@@ -228,5 +230,43 @@ describe('LyricView', () => {
     // are byte-for-byte identical, so it must be skipped: exactly 1 render,
     // not 2. (Delete the React.memo wrap on LyricLine and this becomes 2.)
     expect(lyricLineRenderCount).toBe(1)
+  })
+})
+
+describe('pack-driven rendering', () => {
+  const settings = { ...DEFAULT_SETTINGS }
+
+  it('renders Jyutping under the Cantonese pack', () => {
+    const yueLines = [{ tokens: [{ chars: [{ char: '我', syllables: ['ngo5'] }] }] }]
+    render(
+      <LyricView
+        lines={yueLines} dict={dict} engine={engine()} settings={settings}
+        pack={yuePack} activeLine={-1} activeChar={-1} onPlayLine={() => {}}
+      />,
+    )
+    expect(screen.getByText('ngo5')).toBeInTheDocument()
+  })
+
+  it('renders tone-marked pinyin under the Mandarin pack', () => {
+    const cmnLines = [{ tokens: [{ chars: [{ char: '我', syllables: ['wo3'] }] }] }]
+    render(
+      <LyricView
+        lines={cmnLines} dict={dict} engine={engine()} settings={settings}
+        pack={cmnPack} activeLine={-1} activeChar={-1} onPlayLine={() => {}}
+      />,
+    )
+    expect(screen.getByText('wǒ')).toBeInTheDocument()
+  })
+
+  it('honours the per-language style choice', () => {
+    const yale = { ...DEFAULT_SETTINGS, romanization: { yue: 'yale', cmn: 'tonenum' } }
+    const yueLines = [{ tokens: [{ chars: [{ char: '我', syllables: ['ngo5'] }] }] }]
+    render(
+      <LyricView
+        lines={yueLines} dict={dict} engine={engine()} settings={yale}
+        pack={yuePack} activeLine={-1} activeChar={-1} onPlayLine={() => {}}
+      />,
+    )
+    expect(screen.getByText('ngóh')).toBeInTheDocument()
   })
 })

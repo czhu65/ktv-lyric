@@ -3,6 +3,7 @@ import type { Line, Token } from '../types'
 import type { Dict } from '../dict'
 import type { AudioEngine } from '../audio'
 import type { Settings } from '../storage'
+import type { LanguagePack } from '../lang/types'
 import { showRomanization } from '../romanize/show'
 import GlossPopover from './GlossPopover'
 import LyricLine from './LyricLine'
@@ -13,6 +14,7 @@ interface Props {
   dict: Dict
   engine: AudioEngine
   settings: Settings
+  pack: LanguagePack
   activeLine: number
   activeChar: number
   /** True once the audio manifest has loaded. Defaults to true so callers
@@ -23,10 +25,10 @@ interface Props {
 }
 
 export default function LyricView(
-  { lines, dict, engine, settings, activeLine, activeChar, audioReady = true, onPlayLine }: Props,
+  { lines, dict, engine, settings, pack, activeLine, activeChar, audioReady = true, onPlayLine }: Props,
 ) {
   const [selected, setSelected] = useState<Token | null>(null)
-  const show = (s: string) => showRomanization(s, settings.romanization)
+  const show = (s: string) => showRomanization(s, pack, settings)
 
   // ONE gesture, TWO outcomes: audio fires immediately and is never gated on
   // the popover. The gloss is for the enclosing token, not the character.
@@ -51,6 +53,7 @@ export default function LyricView(
           lineIndex={li}
           engine={engine}
           settings={settings}
+          pack={pack}
           audioReady={audioReady}
           activeCharInThisLine={li === activeLine ? activeChar : null}
           onPlayLine={onPlayLine}
