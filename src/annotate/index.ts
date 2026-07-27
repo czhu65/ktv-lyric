@@ -1,5 +1,6 @@
 import ToJyutping from 'to-jyutping'
 import type { Char, Token } from '../types'
+import { groupTokens } from './group'
 
 export interface SegmentOptions {
   words: ReadonlySet<string>
@@ -27,19 +28,5 @@ export function annotateLine(line: string, opts: SegmentOptions): Token[] {
     syllables: jyutping ? jyutping.split(/\s+/).filter(Boolean) : [],
   }))
 
-  const tokens: Token[] = []
-  let i = 0
-  while (i < chars.length) {
-    let len = 1
-    for (let n = Math.min(opts.maxWordLength, chars.length - i); n >= 2; n--) {
-      const candidate = chars.slice(i, i + n).map((c) => c.char).join('')
-      if (opts.words.has(candidate)) {
-        len = n
-        break
-      }
-    }
-    tokens.push({ chars: chars.slice(i, i + len) })
-    i += len
-  }
-  return tokens
+  return groupTokens(chars, opts)
 }

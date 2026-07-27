@@ -17,6 +17,15 @@ describe('yuePack', () => {
     expect(syllables).toEqual(['tin1', 'hung1'])
   })
 
+  it('emits exactly one Char per input code point, reconstructing the line', () => {
+    // Guards the flat character index the player and LyricLine both rely on.
+    // Binds the shared groupTokens() extraction as much as it binds to-jyutping.
+    const line = '你好，世界！abc 123 天空'
+    const chars = yuePack.annotate(line, OPTS).flatMap((t) => t.chars)
+    expect(chars).toHaveLength([...line].length)
+    expect(chars.map((c) => c.char).join('')).toBe(line)
+  })
+
   it('groups dictionary words into one token', () => {
     const tokens = yuePack.annotate('天空', OPTS)
     expect(tokens).toHaveLength(1)

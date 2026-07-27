@@ -1,4 +1,5 @@
 import { pinyin } from 'pinyin-pro'
+import { groupTokens } from '../annotate/group'
 import type { SegmentOptions } from '../annotate'
 import type { Char, Token } from '../types'
 import { normalizePinyinSyllable } from './pinyin-syllable'
@@ -9,18 +10,17 @@ import type { LanguagePack } from './types'
 // the only one that guarantees this -- `type: 'array'` drops or merges
 // non-Chinese runs depending on the nonZh option, which would desynchronise
 // the flat character index that LyricLine and the player both rely on.
-interface PinyinAll {
-  origin: string
-  pinyin: string
-  isZh: boolean
-}
-
+//
+// pinyin-pro's own .d.ts overloads pinyin() to return AllData[] (with
+// matching origin/pinyin/isZh fields) when `type: 'all'` is passed, so no
+// cast is needed here -- the literal `type: 'all'` below is enough for
+// TypeScript to pick that overload.
 function toChars(line: string): Char[] {
   const entries = pinyin(line, {
     type: 'all',
     toneType: 'num',
     nonZh: 'consecutive',
-  }) as unknown as PinyinAll[]
+  })
 
   const chars: Char[] = []
   for (const e of entries) {
@@ -46,23 +46,7 @@ function toChars(line: string): Char[] {
  * exactly the argument annotate/index.ts already makes for to-jyutping.
  */
 function annotate(line: string, opts: SegmentOptions): Token[] {
-  const chars = toChars(line)
-
-  const tokens: Token[] = []
-  let i = 0
-  while (i < chars.length) {
-    let len = 1
-    for (let n = Math.min(opts.maxWordLength, chars.length - i); n >= 2; n--) {
-      const candidate = chars.slice(i, i + n).map((c) => c.char).join('')
-      if (opts.words.has(candidate)) {
-        len = n
-        break
-      }
-    }
-    tokens.push({ chars: chars.slice(i, i + len) })
-    i += len
-  }
-  return tokens
+  return groupTokens(toChars(line), opts)
 }
 
 export const cmnPack: LanguagePack = {

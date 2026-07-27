@@ -24,6 +24,16 @@ describe('cmnPack', () => {
     expect(chars[3].syllables).toEqual([])
   })
 
+  it('emits exactly one Char per input code point, reconstructing the line', () => {
+    // Guards the flat character index the player and LyricLine both rely on.
+    // A future pinyin-pro that merged an idiom into one multi-char entry would
+    // silently desynchronise the highlight from the text; this catches it.
+    const line = '你好，世界！abc 123 天空'
+    const chars = cmnPack.annotate(line, OPTS).flatMap((t) => t.chars)
+    expect(chars).toHaveLength([...line].length)
+    expect(chars.map((c) => c.char).join('')).toBe(line)
+  })
+
   it('groups dictionary words into one token', () => {
     const tokens = cmnPack.annotate('天空', OPTS)
     expect(tokens).toHaveLength(1)
