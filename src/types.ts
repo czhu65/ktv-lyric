@@ -20,13 +20,14 @@ export interface Line {
   timeMs?: number
 }
 
-export interface Song {
-  title: string
-  artist: string
-  lines: Line[]
-  source: 'lrclib' | 'pasted'
-  lrclibId?: number
-}
+// `Song` -- an annotated lyric bundled with its title/artist/source -- used
+// to live here. It is deliberately gone rather than gaining a `lang` field.
+// Nothing constructs one any more: the IndexedDB cache stores raw,
+// language-independent lines (`CachedLyric` in storage/index.ts) because
+// annotation depends on the active language pack, and App holds the
+// annotated lines together with the pack that produced them. A `Song` would
+// now be a third representation of the same lyric with no owner and no way
+// to stay honest about which language it had been annotated in.
 
 export interface SongCandidate {
   title: string

@@ -1,21 +1,42 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { searchSongs, fetchLyrics, RateLimitError } from './search'
-import { parseLyricText } from './lyrics/parse'
-import { normalize, isSimplified, toTraditional } from './script'
-import { annotateLine } from './annotate'
+import { parseLyricText, type SourceLine } from './lyrics/parse'
+import { normalize, isSimplified, toTraditional, toSimplified } from './script'
 import { loadDict, type Dict } from './dict'
 import { createAudioEngine } from './audio'
-import { createPlayer, type Player, type PlayerState } from './player'
+import { createPlayer, type PlayerState } from './player'
 import { loadSettings, saveSettings, cacheLyric, getCachedLyricByTitleArtist, type Settings } from './storage'
-import { yuePack } from './lang'
+import { getPack, yuePack, type LangId, type LanguagePack } from './lang'
 import type { Line, SongCandidate } from './types'
 import SearchBar from './ui/SearchBar'
 import PasteBox from './ui/PasteBox'
 import Transport from './ui/Transport'
 import SettingsPanel from './ui/SettingsPanel'
+import LangToggle from './ui/LangToggle'
 import LyricView from './ui/LyricView'
 import Credits from './ui/Credits'
 import ThemeToggle from './ui/ThemeToggle'
+
+/**
+ * The annotated lines AND the pack that produced them, as ONE value.
+ *
+ * They are inseparable, so they are stored inseparably. Holding them as two
+ * pieces of state would let React commit renders in which they disagree --
+ * and a disagreement here is silent, not loud: `numToMark` cannot tell a
+ * Jyutping syllable carrying tone 1-4 from a canonical pinyin key, so
+ * Cantonese `tin1` rendered under the Mandarin pack displays as a
+ * plausible-looking `tīn` rather than throwing. Every syllable on screen
+ * would be quietly wrong for a frame.
+ *
+ * Nothing downstream may read the DESIRED pack (`pack` below). LyricView,
+ * LangToggle's audio bank and the player all hang off this object instead,
+ * which makes the mismatched render unrepresentable rather than merely
+ * unlikely.
+ */
+interface View {
+  lines: Line[]
+  pack: LanguagePack
+}
 
 // Shared by onSearch and onPick: whichever path hits LRCLIB's rate limit,
 // the user sees the identical, delay-naming message rather than two
@@ -27,7 +48,7 @@ function rateLimitNotice(e: RateLimitError): string {
 export default function App() {
   const [dict, setDict] = useState<Dict | null>(null)
   const [results, setResults] = useState<SongCandidate[]>([])
-  const [lines, setLines] = useState<Line[]>([])
+  const [view, setView] = useState<View | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [settings, setSettings] = useState<Settings>(loadSettings)
@@ -42,39 +63,84 @@ export default function App() {
   // re-render to pick up the real answer once the manifest does arrive.
   const [audioReady, setAudioReady] = useState(false)
 
-  const ctx = useMemo(() => new AudioContext(), [])
-  const engine = useMemo(() => createAudioEngine(ctx), [ctx])
-  // Lazy ref init: a bare `useRef(createPlayer(...))` calls createPlayer(...)
-  // on EVERY render (React discards all but the first result), constructing
-  // and immediately throwing away a Player each time. `??=` short-circuits,
-  // so createPlayer only ever runs once, on the render that first sees a
-  // null ref.
-  const playerRef = useRef<Player | null>(null)
-  playerRef.current ??= createPlayer({
-    engine,
-    now: () => ctx.currentTime,
-    // setTimeout, NEVER setInterval.
-    schedule: (fn, ms) => void setTimeout(fn, ms),
-  })
-  const player = playerRef.current
+  // The DESIRED language for the current song: what the toggle shows and
+  // what the next annotate() call will use. Deliberately not persisted --
+  // it is a per-song property seeded from a per-track genre guess, so
+  // carrying it across songs would be wrong more often than right.
+  //
+  // There is no separate `lang` state because `pack.id` IS the LangId: two
+  // fields that must always agree are one field. The pack objects are module
+  // singletons, so this doubles as a stable useMemo/useCallback dependency.
+  const [pack, setPack] = useState<LanguagePack>(yuePack)
+  const [packBusy, setPackBusy] = useState(false)
 
-  // Bumped on every new pick and every paste submission. Both fetchLyrics
-  // (network) and annotate (async script detection) can resolve out of
-  // order across two overlapping actions -- the same class of race
-  // src/player/index.ts solves with its own `generation` counter. Any
-  // setLines/setNotice that follows an await is gated on this so a slow,
-  // stale action can never clobber a newer one's result.
+  // The raw source lines behind whatever `view` currently shows. Kept so the
+  // toggle can re-annotate without refetching -- this is what the storage
+  // change in Task 10 exists to make possible.
+  //
+  // A ref rather than state: nothing renders it, and it is written in the
+  // same step as `view` (below the same generation guard), so the two can
+  // never disagree. Keeping it out of state also keeps it out of
+  // onLangChange's dependency array, which would otherwise churn the
+  // identity of every callback downstream of it on every new lyric.
+  const rawRef = useRef<SourceLine[]>([])
+
+  const ctx = useMemo(() => new AudioContext(), [])
+  // The audio bank follows the DISPLAYED pack, never the desired one. Each
+  // language has its own clip directory, manifest and LRU, and during a
+  // switch the two packs differ for a render or two -- a tap in that window
+  // would fetch a clip from the bank the user is leaving. Reading the pack
+  // off `view` makes that impossible for the same reason it does for the
+  // ruby text. Swapping the object also discards the previous language's
+  // decoded buffers, which is desirable: they are useless now and would
+  // otherwise sit in memory.
+  const enginePack = view?.pack ?? yuePack
+  const engine = useMemo(
+    () => createAudioEngine(ctx, { dir: enginePack.audioDir, manifest: enginePack.manifest }),
+    [ctx, enginePack],
+  )
+
+  // The player captures its engine at construction, so it has to be rebuilt
+  // alongside it -- otherwise "play line" after a language switch would
+  // prefetch pinyin keys out of the Cantonese directory. useMemo (not a bare
+  // `useRef(createPlayer(...))`, which would construct and immediately throw
+  // away a Player on EVERY render) keeps construction to once per engine.
+  const player = useMemo(
+    () => createPlayer({
+      engine,
+      now: () => ctx.currentTime,
+      // setTimeout, NEVER setInterval.
+      schedule: (fn, ms) => void setTimeout(fn, ms),
+    }),
+    [ctx, engine],
+  )
+
+  // Bumped on every new pick, paste submission and language switch. All of
+  // fetchLyrics (network), getPack (a lazy chunk import) and annotate (async
+  // script detection) can resolve out of order across two overlapping
+  // actions -- the same class of race src/player/index.ts solves with its
+  // own `generation` counter. Any setView/setNotice that follows an await is
+  // gated on this so a slow, stale action can never clobber a newer one's
+  // result.
   const genRef = useRef(0)
 
   // Holds the most recent pick/paste that arrived while the dictionary was
   // still loading. Overwritten (never queued as a list) so that once the
   // dictionary lands, only the LATEST such action replays -- consistent
   // with the generation guard's "only the most recent action may commit"
-  // rule rather than fighting it.
-  const pendingRef = useRef<{ raw: { text: string; timeMs?: number }[]; gen: number } | null>(null)
+  // rule rather than fighting it. Carries its pack for the same reason
+  // `view` does: the replay must annotate with the pack that was chosen for
+  // it, not with whatever the toggle happens to say by the time it runs.
+  const pendingRef = useRef<{ raw: SourceLine[]; pack: LanguagePack; gen: number } | null>(null)
 
   useEffect(() => { loadDict().then(setDict).catch(() => setNotice('Dictionary failed to load')) }, [])
-  useEffect(() => player.subscribe(setPstate), [player])
+  useEffect(() => {
+    const unsubscribe = player.subscribe(setPstate)
+    // Stop the OUTGOING player when a language switch replaces it: its
+    // pump() loop is driven by setTimeout and would otherwise keep
+    // scheduling clips from the bank the user just left.
+    return () => { unsubscribe(); player.stop() }
+  }, [player])
   useEffect(() => {
     saveSettings(settings)
     player.setInterLineGap(settings.interLineGapSec)
@@ -88,6 +154,10 @@ export default function App() {
   // active during playback.
   useEffect(() => {
     let cancelled = false
+    // A new engine means a new language and a new inventory: go back to
+    // "not yet known" so LyricLine doesn't mark characters as missing based
+    // on the PREVIOUS language's manifest while this one is in flight.
+    setAudioReady(false)
     engine.preloadManifest()
       .then(() => { if (!cancelled) setAudioReady(true) })
       .catch(() => { if (!cancelled) setNotice('Audio failed to load — playback may not work. Try reloading.') })
@@ -102,13 +172,18 @@ export default function App() {
     if (pstate.error) setNotice('Audio failed to load — playback may not work. Try reloading.')
   }, [pstate.error])
 
+  // Takes the pack as an ARGUMENT rather than closing over `pack` state.
+  // That is what makes the language switch atomic: the caller resolves the
+  // pack first and hands it straight in, so annotate always commits lines
+  // together with the exact pack that produced them, with no window in
+  // which a state update could put the two out of step.
+  //
   // Returns the annotated lines on success so callers that need them for
-  // more than just display (Finding 4: onPick caches a Song built from
-  // them) don't have to re-derive them from state. Returns undefined both
-  // when queued (dict not ready yet) and when superseded by a newer
-  // pick/paste -- either way there is nothing a caller could safely use.
+  // more than just display don't have to re-derive them from state. Returns
+  // undefined both when queued (dict not ready yet) and when superseded by a
+  // newer action -- either way there is nothing a caller could safely use.
   const annotate = useCallback(async (
-    raw: { text: string; timeMs?: number }[], gen: number,
+    raw: SourceLine[], p: LanguagePack, gen: number,
   ): Promise<Line[] | undefined> => {
     if (!dict) {
       // The dictionary is fetched over the network and may not have landed
@@ -116,29 +191,44 @@ export default function App() {
       // staring at a pick/paste that visibly did nothing. Queue this action
       // and recover automatically -- see the "Fix round 1" report for why
       // auto-retry was chosen over an ask-the-user-to-retry message.
-      pendingRef.current = { raw, gen }
+      pendingRef.current = { raw, pack: p, gen }
       setNotice('Dictionary is still loading — this will continue automatically once it finishes.')
       return undefined
     }
     const out: Line[] = []
     for (const l of raw) {
-      // Never feed Simplified to to-jyutping — it fails silently on mergers.
-      // toTraditional is NOT idempotent on Traditional input — it still
-      // normalises glyph variants (e.g. it can rewrite a word's characters
-      // to a different, equally-Traditional spelling), so Traditional
-      // lyrics must pass through untouched rather than being run through
-      // conversion. Detect first, and only convert text that is actually
-      // Simplified.
+      // Each pack's annotator requires one script and fails quietly on the
+      // other: to-jyutping loses Simplified mergers, and pinyin-pro's
+      // polyphone table is Simplified-keyed. Convert to whichever this pack
+      // asked for.
       let text = normalize(l.text)
-      if (await isSimplified(text)) text = await toTraditional(text)
+      if (p.script === 'trad') {
+        // toTraditional is NOT idempotent on Traditional input -- it still
+        // normalises glyph variants -- so detect first and only convert text
+        // that is actually Simplified.
+        if (await isSimplified(text)) text = await toTraditional(text)
+      } else {
+        // t2s IS safe to run unconditionally, and this was verified rather
+        // than assumed: sweeping every CJK Unified Ideograph in the BMP,
+        // exactly ONE character is not a fixed point of t2s (薴 U+85B4
+        // "limonene" -> 苧 -> 苎, an incomplete entry in opencc's own table),
+        // and it is Traditional, not Simplified -- isSimplified(薴) is false,
+        // so the detect-first shape used above would produce the identical
+        // 苧 anyway. Genuine Simplified text passes through untouched.
+        // Running it unconditionally also handles mixed-script lines, which
+        // the detect-first branch cannot.
+        text = await toSimplified(text)
+      }
       // Annotate the WHOLE line. A break inside a word changes the reading.
       out.push({
-        tokens: annotateLine(text, { words: dict.keys(), maxWordLength: dict.maxKeyLength }),
+        tokens: p.annotate(text, { words: dict.keys(), maxWordLength: dict.maxKeyLength }),
         timeMs: l.timeMs,
       })
     }
-    if (gen !== genRef.current) return undefined // a newer pick/paste has since won
-    setLines(out)
+    if (gen !== genRef.current) return undefined // a newer action has since won
+    rawRef.current = raw
+    // ONE write. `out` and `p` reach the DOM in the same commit or not at all.
+    setView({ lines: out, pack: p })
     return out
   }, [dict])
 
@@ -148,8 +238,52 @@ export default function App() {
     if (!dict || !pendingRef.current) return
     const pending = pendingRef.current
     pendingRef.current = null
-    void annotate(pending.raw, pending.gen)
+    void annotate(pending.raw, pending.pack, pending.gen)
   }, [dict, annotate])
+
+  /**
+   * Commit `next` as the desired language and hand back its pack -- or, if
+   * the lazy Mandarin chunk cannot be fetched, leave the language exactly
+   * where it is, post a notice, and hand back the CURRENT pack.
+   *
+   * Never throws and never half-switches. The returned pack is always the
+   * one the caller should annotate with, so a failed switch degrades to
+   * "still the old language, with an explanation" rather than to a toggle
+   * and a lyric that disagree.
+   *
+   * Deliberately does NOT re-annotate: onPick needs the pack for a lyric it
+   * is ABOUT to annotate, not for the one currently on screen.
+   */
+  const selectPack = useCallback(async (next: LangId | undefined): Promise<LanguagePack> => {
+    if (!next || next === pack.id) return pack
+    try {
+      const p = await getPack(next)
+      setPack(p)
+      return p
+    } catch {
+      // A lazy chunk fetch can fail offline. getPack clears its own memo on
+      // failure, so a later retry is not permanently poisoned.
+      setNotice('Could not load that language. Check your connection and try again.')
+      return pack
+    }
+  }, [pack])
+
+  // Switching language re-annotates from the raw lines behind the current
+  // view. No network, no refetch -- the cache holds raw text precisely so
+  // this is a pure recompute.
+  const onLangChange = useCallback(async (next: LangId) => {
+    setPackBusy(true)
+    setNotice(null)
+    try {
+      const p = await selectPack(next)
+      if (p.id !== next) return // the switch failed; selectPack already said so
+      if (rawRef.current.length === 0) return
+      genRef.current++
+      await annotate(rawRef.current, p, genRef.current)
+    } finally {
+      setPackBusy(false)
+    }
+  }, [annotate, selectPack])
 
   const onSearch = useCallback(async (q: string) => {
     setBusy(true); setNotice(null)
@@ -181,7 +315,17 @@ export default function App() {
       // pick via the outer catch below.
       const cached = await getCachedLyricByTitleArtist(c.title, c.artist).catch(() => null)
       if (cached) {
-        await annotate(cached.raw, gen)
+        if (gen !== genRef.current) return
+        // Seed the toggle from whichever guess we have: the fresh
+        // candidate's wins, since the cached one may predate a genre-table
+        // update. `undefined` means "no opinion" and keeps the current
+        // language. Resolved BEFORE annotating, and threaded straight in --
+        // switching the language and rendering this song are one step, not
+        // two, so the cached lyric is never shown under the wrong pack (and
+        // the previous song's lines are never re-annotated in its place).
+        const p = await selectPack(c.langGuess ?? cached.langGuess)
+        if (gen !== genRef.current) return
+        await annotate(cached.raw, p, gen)
         return
       }
 
@@ -189,7 +333,10 @@ export default function App() {
       if (gen !== genRef.current) return // superseded by a later pick
       if (!result) { setNotice('No lyrics found for that track. Paste them below to continue.'); return }
 
-      const out = await annotate(result.raw, gen)
+      const p = await selectPack(c.langGuess)
+      if (gen !== genRef.current) return
+
+      const out = await annotate(result.raw, p, gen)
       // out is undefined if annotate queued (dict still loading) or was
       // itself superseded -- either way there's nothing new to cache yet.
       // lrclibId can be missing on an otherwise-valid LRCLIB record; caching
@@ -202,6 +349,10 @@ export default function App() {
           title: c.title,
           artist: c.artist,
           raw: result.raw,
+          // The guess, not the pack actually used: this records what the
+          // metadata said, so a later pick reproduces the same seed even if
+          // the user had manually overridden the toggle for this listen.
+          langGuess: c.langGuess,
         }).catch(() => {})
       }
     } catch (e) {
@@ -216,21 +367,23 @@ export default function App() {
       // must not flip it false out from under a newer pick still in flight.
       if (gen === genRef.current) setBusy(false)
     }
-  }, [annotate])
+  }, [annotate, selectPack])
 
+  // Pasted text carries no metadata to guess from, so it uses whichever
+  // language is currently selected -- which for a fresh load is Cantonese.
   const onPaste = useCallback((text: string) => {
     genRef.current++
     const gen = genRef.current
     setNotice(null)
-    void annotate(parseLyricText(text), gen)
-  }, [annotate])
+    void annotate(parseLyricText(text), pack, gen)
+  }, [annotate, pack])
 
   return (
     <div className="app">
       <header className="app-header">
         <div className="app-header-inner">
           <h1 className="app-title">
-            Cantonese KTV Lyrics<span className="zh">粵語歌詞</span>
+            KTV Lyrics<span className="zh">歌詞發音</span>
           </h1>
           <ThemeToggle
             theme={settings.theme}
@@ -247,19 +400,31 @@ export default function App() {
         <PasteBox onSubmit={onPaste} />
         <SettingsPanel settings={settings} onChange={setSettings} />
 
-        {lines.length > 0 && dict ? (
-          <LyricView
-            lines={lines} dict={dict} engine={engine} settings={settings} pack={yuePack}
-            activeLine={pstate.lineIndex} activeChar={pstate.charIndex}
-            audioReady={audioReady}
-            onPlayLine={(i) => player.playLine(lines[i], i)}
-          />
+        {view && dict ? (
+          <>
+            {/* The toggle shows the DESIRED language (immediate feedback on
+                tap); the lyric below it shows the pack that actually
+                annotated what you are reading. They converge within a tick,
+                and `busy` keeps the control disabled until they do. */}
+            <LangToggle
+              value={pack.id}
+              busy={packBusy || busy}
+              onChange={(id) => void onLangChange(id)}
+            />
+            <LyricView
+              lines={view.lines} dict={dict} engine={engine} settings={settings}
+              pack={view.pack}
+              activeLine={pstate.lineIndex} activeChar={pstate.charIndex}
+              audioReady={audioReady}
+              onPlayLine={(i) => player.playLine(view.lines[i], i)}
+            />
+          </>
         ) : (
           <div className="empty">
             <p className="empty-title">睇歌詞，學發音</p>
             <p>
-              Search for a song above, or paste a lyric in. Every character gets its Cantonese
-              reading — tap one to hear it and see what the word means.
+              Search for a song above, or paste a lyric in. Every character gets its Cantonese or
+              Mandarin reading — tap one to hear it and see what the word means.
             </p>
           </div>
         )}
@@ -269,10 +434,10 @@ export default function App() {
 
       {/* Rendered outside <main> because it is fixed to the viewport, not to
           the document flow. */}
-      {lines.length > 0 && dict && (
+      {view && dict && (
         <Transport
           playing={pstate.playing}
-          onPlayAll={() => player.playAll(lines)}
+          onPlayAll={() => player.playAll(view.lines)}
           onStop={() => player.stop()}
           gapSec={settings.interLineGapSec}
           onGapChange={(sec) => setSettings((s) => ({ ...s, interLineGapSec: sec }))}
