@@ -1,4 +1,4 @@
-# Cantonese & Mandarin KTV Lyrics
+# Chinese KTV Lyrics
 
 A free, non-commercial study tool for learning to sing Canto-pop and Mandopop.
 

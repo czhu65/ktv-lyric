@@ -435,7 +435,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-inner">
           <h1 className="app-title">
-            KTV Lyrics<span className="zh">歌詞發音</span>
+            Chinese KTV Lyrics<span className="zh">歌詞發音</span>
           </h1>
           <ThemeToggle
             theme={settings.theme}
