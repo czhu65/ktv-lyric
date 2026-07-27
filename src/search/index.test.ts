@@ -86,6 +86,25 @@ describe('searchSongs', () => {
     expect(r[0].title).toBe('T')
   })
 
+  it('issues ONE LRCLIB fallback per script variant, not one per storefront', async () => {
+    // Both storefront jobs for a variant fail together during an iTunes-wide
+    // outage. Without a shared promise they would each hit LRCLIB with the
+    // same query, doubling load exactly when its rate limiter is most likely
+    // to trip.
+    const lrclibCalls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('itunes')) return new Response('', { status: 503 })
+      lrclibCalls.push(url)
+      return new Response(JSON.stringify([]))
+    }))
+
+    await searchSongs('浮誇') // 2 variants x 2 storefronts = 4 iTunes failures
+
+    // 2 variants -> exactly 2 LRCLIB calls, not 4.
+    expect(lrclibCalls).toHaveLength(2)
+    expect(new Set(lrclibCalls).size).toBe(2) // and they are distinct queries
+  })
+
   it('propagates RateLimitError from the LRCLIB fallback instead of swallowing it', async () => {
     // There is no server-side fallback beyond LRCLIB. If iTunes is down and
     // LRCLIB is rate limited, searchSongs must reject with RateLimitError so
