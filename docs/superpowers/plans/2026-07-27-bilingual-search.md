@@ -465,6 +465,18 @@ export interface LanguagePack {
   audioDir: string
   /** Relative to BASE_URL. */
   manifest: string
+  /**
+   * Which script this pack's annotator REQUIRES. The caller converts the line
+   * to this script before calling annotate().
+   *
+   * to-jyutping fails silently on Simplified mergers, so Cantonese needs
+   * 'trad'. pinyin-pro's polyphone dictionary is Simplified-keyed and falls
+   * back to default per-character readings on Traditional input (銀行 ->
+   * yin2 xing2 instead of hang2; 音樂 -> yin1 le4 instead of yue4), so
+   * Mandarin needs 'simp'. Accepted consequence: a Traditional lyric read as
+   * Mandarin is DISPLAYED in Simplified.
+   */
+  script: 'trad' | 'simp'
 }
 ```
 
@@ -490,6 +502,7 @@ export const yuePack: LanguagePack = {
   ],
   audioDir: 'audio/syl',
   manifest: 'data/syllables.json',
+  script: 'trad',
 }
 ```
 
@@ -556,13 +569,29 @@ describe('cmnPack', () => {
     expect(tokens[0].chars).toHaveLength(2)
   })
 
-  it('resolves a polyphone from word context', () => {
-    // 行 is xing2 in 行走 but hang2 in 銀行. pinyin-pro decides; we only
-    // assert the two differ, so the test does not encode one engine version's
-    // exact answer.
+  it('declares that it needs Simplified input', () => {
+    expect(cmnPack.script).toBe('simp')
+  })
+
+  it('resolves a polyphone from word context, given SIMPLIFIED input', () => {
+    // 行 is xing2 in 行走 but hang2 in 银行.
+    //
+    // The input MUST be Simplified: pinyin-pro's polyphone dictionary is
+    // Simplified-keyed, and Traditional 銀行 silently returns yin2 xing2.
+    // That is why LanguagePack carries `script` and why App.tsx converts to
+    // pack.script before calling annotate.
     const walk = cmnPack.annotate('行走', OPTS)[0].chars[0].syllables[0]
+    const bank = cmnPack.annotate('银行', OPTS).flatMap((t) => t.chars)[1].syllables[0]
+    expect(walk).toBe('xing2')
+    expect(bank).toBe('hang2')
+  })
+
+  it('does NOT resolve polyphones on Traditional input — the reason `script` exists', () => {
+    // Characterizes the engine limitation this design works around. If a
+    // future pinyin-pro gains Traditional support this test will fail, which
+    // is the signal to revisit LanguagePack.script — not to delete the test.
     const bank = cmnPack.annotate('銀行', OPTS).flatMap((t) => t.chars)[1].syllables[0]
-    expect(walk).not.toBe(bank)
+    expect(bank).toBe('xing2')
   })
 
   it('offers tone marks first, tone numbers second', () => {
@@ -671,6 +700,7 @@ export const cmnPack: LanguagePack = {
   ],
   audioDir: 'audio/pin',
   manifest: 'data/pinyin.json',
+  script: 'simp',
 }
 ```
 
@@ -1914,7 +1944,33 @@ Replace the engine memo so it follows the pack:
 
 - [ ] **Step 4: Make annotate use the pack, and re-run it on toggle**
 
-Change the `annotate` callback's body to use `pack.annotate` and to remember the raw lines:
+First, convert to the script the active pack requires. Replace the existing
+Simplified→Traditional block:
+
+```ts
+      let text = normalize(l.text)
+      if (pack.script === 'trad') {
+        // toTraditional is NOT idempotent on Traditional input -- it still
+        // normalises glyph variants -- so detect first and only convert text
+        // that is actually Simplified.
+        if (await isSimplified(text)) text = await toTraditional(text)
+      } else {
+        // t2s IS safe to run unconditionally: already-Simplified characters
+        // are absent from the 't' source table and pass through untouched.
+        // Running it unconditionally also handles mixed-script lines, which
+        // the detect-first branch above cannot.
+        text = await toSimplified(text)
+      }
+```
+
+**Verify the idempotence claim empirically** before relying on it — run
+`toSimplified` twice over a Simplified string and confirm it is unchanged. If
+it is not idempotent, mirror the `trad` branch's detect-first shape instead and
+say so in your report.
+
+Add `toSimplified` to the existing `./script` import.
+
+Then change the annotation call to use `pack.annotate` and remember the raw lines:
 
 ```ts
       out.push({

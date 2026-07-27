@@ -59,6 +59,36 @@ song probed, beating Cantonese, where 喜帖街 / 謝安琪 returned zero.
 | Language guess | **iTunes `primaryGenreName` lookup table** | Per-track, so bilingual artists resolve correctly; 10/10 on the sampled top hits |
 | Glosses | **Reuse `dict.json` unchanged** | It is CC-CEDICT-derived and already Mandarin |
 | Song cache | **Cache raw lyric lines, not the annotation** | Annotation is language-dependent; caching raw makes toggling a pure recompute |
+| Script direction | **A property of the pack: `yue` → Traditional, `cmn` → Simplified** | See §5.1 — pinyin-pro's polyphone dictionary is Simplified-keyed, so Traditional input silently yields wrong readings |
+
+### 3.1 Amendment, 2026-07-27 (found during Task 4 implementation)
+
+The original spec assumed one script path served both packs: convert everything
+to Traditional, because to-jyutping requires it. **That is wrong for Mandarin.**
+
+`pinyin-pro`'s word dictionary — the thing that resolves polyphones from
+context — is keyed on **Simplified**. Given Traditional input it finds no word
+match and falls back to each character's default reading. Measured against
+pinyin-pro 3.28.2:
+
+| Word | Traditional in | Simplified in | Correct |
+|---|---|---|---|
+| 銀行 / 银行 | yin2 **xing2** ✗ | yin2 **hang2** ✓ | háng |
+| 音樂 / 音乐 | yin1 **le4** ✗ | yin1 **yue4** ✓ | yuè |
+| 長大 / 长大 | **chang2** da4 ✗ | **zhang3** da4 ✓ | zhǎng |
+| 重複 / 重复 | **zhong4** fu4 ✗ | **chong2** fu4 ✓ | chóng |
+| 覺得 / 觉得 | jue2 **de2** ✗ | jue2 **de0** ✓ | de (neutral) |
+
+Every Traditional case is wrong, and 音樂 → "yīn **lè**" is exactly the class of
+error a pronunciation-teaching app cannot ship.
+
+**Resolution:** `LanguagePack` gains `script: 'trad' | 'simp'`, and the
+annotation step converts the line to whatever the active pack declares. The
+consequence is accepted deliberately: **a Traditional lyric opened under the
+Mandarin pack is displayed in Simplified.** Mapping readings back onto the
+original characters was considered and rejected as more machinery than the
+result justifies, since Traditional↔Simplified is not reliably 1:1 at the
+character level.
 
 ## 4. Search fan-out
 
@@ -127,8 +157,14 @@ export interface LanguagePack {
   romanizations: RomanizationStyle[]
   audioDir: string                  // 'audio/syl' | 'audio/pin'
   manifest: string                  // 'data/syllables.json' | 'data/pinyin.json'
+  script: 'trad' | 'simp'           // see §3.1 — the annotator's required script
 }
 ```
+
+`script` is what the caller converts to before invoking `annotate()`. Cantonese
+declares `'trad'` (to-jyutping fails silently on Simplified mergers); Mandarin
+declares `'simp'` (pinyin-pro resolves polyphones only against a
+Simplified-keyed dictionary).
 
 Both languages share some syllable spellings (`sin1` is valid in each), but never collide: the pack
 carries its own directory and manifest.
