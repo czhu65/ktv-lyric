@@ -6,8 +6,8 @@ import { annotateLine } from './annotate'
 import { loadDict, type Dict } from './dict'
 import { createAudioEngine } from './audio'
 import { createPlayer, type Player, type PlayerState } from './player'
-import { loadSettings, saveSettings, type Settings } from './storage'
-import type { Line, SongCandidate } from './types'
+import { loadSettings, saveSettings, cacheSong, getCachedSongByTitleArtist, type Settings } from './storage'
+import type { Line, Song, SongCandidate } from './types'
 import SearchBar from './ui/SearchBar'
 import PasteBox from './ui/PasteBox'
 import Transport from './ui/Transport'
@@ -30,8 +30,15 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null)
   const [settings, setSettings] = useState<Settings>(loadSettings)
   const [pstate, setPstate] = useState<PlayerState>(
-    { playing: false, lineIndex: -1, charIndex: -1 },
+    { playing: false, lineIndex: -1, charIndex: -1, error: null },
   )
+  // Becomes true once the audio manifest has loaded (see the mount effect
+  // below). Threaded down to LyricView/LyricLine as a real prop so
+  // React.memo picks up the transition and every line gets one settle-render
+  // -- see Finding 2: has() defaults to "available" before the manifest
+  // loads, and without this, a line that never becomes active would never
+  // re-render to pick up the real answer once the manifest does arrive.
+  const [audioReady, setAudioReady] = useState(false)
 
   const ctx = useMemo(() => new AudioContext(), [])
   const engine = useMemo(() => createAudioEngine(ctx), [ctx])
@@ -71,7 +78,36 @@ export default function App() {
     player.setInterLineGap(settings.interLineGapSec)
   }, [settings, player])
 
-  const annotate = useCallback(async (raw: { text: string; timeMs?: number }[], gen: number) => {
+  // preloadManifest() fetches ONLY the syllable manifest -- unlike unlock(),
+  // it never calls AudioContext.resume(), so it's safe to run at mount with
+  // no user gesture. This is what lets has() settle to real answers (see
+  // Finding 2) before the user has tapped or played anything, instead of
+  // only ever settling reactively off of whichever line happens to become
+  // active during playback.
+  useEffect(() => {
+    let cancelled = false
+    engine.preloadManifest()
+      .then(() => { if (!cancelled) setAudioReady(true) })
+      .catch(() => { if (!cancelled) setNotice('Audio failed to load — playback may not work. Try reloading.') })
+    return () => { cancelled = true }
+  }, [engine])
+
+  // Surfaces a failed unlock()/prefetch() from the player (Finding 3) --
+  // without this, a 404'd manifest fetch inside start() would fail
+  // invisibly: no notice, and (before the player-side fix) an unhandled
+  // promise rejection.
+  useEffect(() => {
+    if (pstate.error) setNotice('Audio failed to load — playback may not work. Try reloading.')
+  }, [pstate.error])
+
+  // Returns the annotated lines on success so callers that need them for
+  // more than just display (Finding 4: onPick caches a Song built from
+  // them) don't have to re-derive them from state. Returns undefined both
+  // when queued (dict not ready yet) and when superseded by a newer
+  // pick/paste -- either way there is nothing a caller could safely use.
+  const annotate = useCallback(async (
+    raw: { text: string; timeMs?: number }[], gen: number,
+  ): Promise<Line[] | undefined> => {
     if (!dict) {
       // The dictionary is fetched over the network and may not have landed
       // yet. Silently no-op-ing here (the old behaviour) leaves the user
@@ -80,7 +116,7 @@ export default function App() {
       // auto-retry was chosen over an ask-the-user-to-retry message.
       pendingRef.current = { raw, gen }
       setNotice('Dictionary is still loading — this will continue automatically once it finishes.')
-      return
+      return undefined
     }
     const out: Line[] = []
     for (const l of raw) {
@@ -99,8 +135,9 @@ export default function App() {
         timeMs: l.timeMs,
       })
     }
-    if (gen !== genRef.current) return // a newer pick/paste has since won
+    if (gen !== genRef.current) return undefined // a newer pick/paste has since won
     setLines(out)
+    return out
   }, [dict])
 
   // Once the dictionary lands, replay whichever pick/paste got queued (by
@@ -131,10 +168,35 @@ export default function App() {
     const gen = genRef.current
     setBusy(true); setNotice(null)
     try {
-      const raw = await fetchLyrics(c)
+      // Finding 4: a SongCandidate never carries LRCLIB's id (that's only
+      // learned from the fetch below), so title+artist is the only key
+      // available before any network call -- see getCachedSongByTitleArtist's
+      // own comment in storage/index.ts. A hit here skips fetchLyrics
+      // entirely: no network call, and the lines are already annotated.
+      // Wrapped separately so a cache-read failure (e.g. no IndexedDB
+      // support) fails OPEN into a normal fetch, rather than aborting the
+      // pick via the outer catch below.
+      const cached = await getCachedSongByTitleArtist(c.title, c.artist).catch(() => null)
+      if (cached) {
+        if (gen === genRef.current) setLines(cached.lines)
+        return
+      }
+
+      const result = await fetchLyrics(c)
       if (gen !== genRef.current) return // superseded by a later pick
-      if (!raw) setNotice('No lyrics found for that track. Paste them below to continue.')
-      else await annotate(raw, gen)
+      if (!result) { setNotice('No lyrics found for that track. Paste them below to continue.'); return }
+
+      const out = await annotate(result.raw, gen)
+      // out is undefined if annotate queued (dict still loading) or was
+      // itself superseded -- either way there's nothing new to cache yet.
+      // lrclibId can be missing on an otherwise-valid LRCLIB record; caching
+      // requires it since it's the cache's own lookup key.
+      if (out && result.lrclibId != null) {
+        const song: Song = { title: c.title, artist: c.artist, lines: out, source: 'lrclib', lrclibId: result.lrclibId }
+        // Fire-and-forget: a failed write shouldn't block playback, and (per
+        // Finding 3's lesson) must not escape as an unhandled rejection.
+        void cacheSong(song).catch(() => {})
+      }
     } catch (e) {
       if (gen !== genRef.current) return
       setNotice(
@@ -174,7 +236,8 @@ export default function App() {
           <LyricView
             lines={lines} dict={dict} engine={engine} settings={settings}
             activeLine={pstate.lineIndex} activeChar={pstate.charIndex}
-            onPlayLine={(i) => player.playLine(lines[i])}
+            audioReady={audioReady}
+            onPlayLine={(i) => player.playLine(lines[i], i)}
           />
         </>
       )}

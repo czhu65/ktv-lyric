@@ -69,8 +69,8 @@ describe('App', () => {
     const songB = { title: 'Song B', artist: 'Artist' }
     vi.mocked(searchSongs).mockResolvedValue([songA, songB])
 
-    const first = deferred<{ text: string; timeMs?: number }[] | null>()
-    const second = deferred<{ text: string; timeMs?: number }[] | null>()
+    const first = deferred<{ raw: { text: string; timeMs?: number }[]; lrclibId?: number } | null>()
+    const second = deferred<{ raw: { text: string; timeMs?: number }[]; lrclibId?: number } | null>()
     vi.mocked(fetchLyrics).mockImplementation(async (c) =>
       (c.title === songA.title ? first.promise : second.promise))
 
@@ -86,10 +86,10 @@ describe('App', () => {
 
     // Resolve OUT OF ORDER: the slower first pick (A) settles after the
     // second, faster one (B).
-    second.resolve([{ text: '一齊' }])
+    second.resolve({ raw: [{ text: '一齊' }], lrclibId: 2 })
     await screen.findByRole('button', { name: /一/ }, { timeout: 3000 })
 
-    first.resolve([{ text: '唱歌' }])
+    first.resolve({ raw: [{ text: '唱歌' }], lrclibId: 1 })
     // Give A's now-stale annotate() chain (its own script-detection awaits)
     // every chance to run and wrongly overwrite the screen before asserting
     // it didn't.
@@ -122,6 +122,37 @@ describe('App', () => {
 
     // No further user action -- this must complete on its own.
     expect(await screen.findByRole('button', { name: /唱/ }, { timeout: 5000 })).toBeInTheDocument()
+  })
+
+  // --- Finding 4 (this pass): picking an already-cached song must reuse it
+  // instead of refetching -- this is what the IndexedDB song cache
+  // (src/storage/index.ts) exists for. ---
+
+  it('caches a picked song and reuses it on a second pick without a network call', async () => {
+    const songA = { title: 'Song A', artist: 'Artist' }
+    vi.mocked(searchSongs).mockResolvedValue([songA])
+    vi.mocked(fetchLyrics).mockResolvedValue({ raw: [{ text: '唱歌' }], lrclibId: 7 })
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByRole('searchbox'), '歌')
+    await screen.findByRole('button', { name: /Song A/ }, { timeout: 2000 })
+
+    await user.click(screen.getByRole('button', { name: /Song A/ }))
+    expect(await screen.findByRole('button', { name: /唱/ }, { timeout: 2000 })).toBeInTheDocument()
+    expect(fetchLyrics).toHaveBeenCalledTimes(1)
+
+    // Let the fire-and-forget IndexedDB write from the first pick settle
+    // before picking again.
+    await flush()
+    await flush()
+
+    // Clear the rendered lyric via a paste-triggered no-op is unnecessary --
+    // just pick the SAME result again and confirm no second fetch happens.
+    await user.click(screen.getByRole('button', { name: /Song A/ }))
+    expect(await screen.findByRole('button', { name: /唱/ }, { timeout: 2000 })).toBeInTheDocument()
+    expect(fetchLyrics).toHaveBeenCalledTimes(1) // still 1 -- the cache served the second pick
   })
 
   // --- Finding 4: createPlayer must be constructed exactly once ---
