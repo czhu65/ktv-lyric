@@ -1,3 +1,4 @@
+import type { LanguagePack } from '../lang/types'
 import type { Settings } from '../storage'
 import { SettingsIcon } from './icons'
 
@@ -7,7 +8,8 @@ import { SettingsIcon } from './icons'
  * you reach for mid-listen.
  */
 export default function SettingsPanel(
-  { settings, onChange }: { settings: Settings; onChange(s: Settings): void },
+  { settings, pack, onChange }:
+    { settings: Settings; pack: LanguagePack; onChange(s: Settings): void },
 ) {
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     onChange({ ...settings, [key]: value })
@@ -26,13 +28,19 @@ export default function SettingsPanel(
             <label className="setting-label" htmlFor="set-romanization">
               Romanization
             </label>
+            {/* Options come from the ACTIVE pack, and the change writes only
+                that language's slot -- so a Cantonese preference survives a
+                trip through a Mandarin song and back. */}
             <select
               id="set-romanization"
-              value={settings.romanization.yue}
-              onChange={(e) => set('romanization', { ...settings.romanization, yue: e.target.value })}
+              value={settings.romanization[pack.id]}
+              onChange={(e) =>
+                set('romanization', { ...settings.romanization, [pack.id]: e.target.value })
+              }
             >
-              <option value="jyutping">Jyutping — tone numbers (ngo5)</option>
-              <option value="yale">Yale — tone marks (ngóh)</option>
+              {pack.romanizations.map((r) => (
+                <option key={r.id} value={r.id}>{r.label}</option>
+              ))}
             </select>
           </div>
 

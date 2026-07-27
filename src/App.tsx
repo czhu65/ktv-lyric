@@ -434,7 +434,7 @@ export default function App() {
         {notice && <p className="notice" role="alert">{notice}</p>}
 
         <PasteBox onSubmit={onPaste} />
-        <SettingsPanel settings={settings} onChange={setSettings} />
+        <SettingsPanel settings={settings} pack={pack} onChange={setSettings} />
 
         {view && dict ? (
           <>
