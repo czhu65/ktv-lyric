@@ -2269,9 +2269,47 @@ git commit -m "feat(ui): romanization options follow the active language pack"
 
 **Interfaces:**
 - Consumes: `public/data/dict.json`, `pinyin-pro`
-- Produces: `derivePinyinInventory(dictPath): string[]` — sorted canonical keys; `public/audio/pin/*.mp3` and `public/data/pinyin.json`.
+- Produces: `derivePinyinInventory(dictPath)` → `{ syllables: string[], representatives: Record<string,string>, unreachable: string[] }`; plus `public/audio/pin/*.mp3` and `public/data/pinyin.json`.
 
 **Note:** the normalizer is duplicated in `.mjs` rather than imported from `src/lang/pinyin-syllable.ts`, because build scripts are plain ESM with no TypeScript pipeline. Task 16's coverage test guards the two against drifting apart.
+
+### Amendment — synthesis backend (2026-07-27)
+
+AWS credentials are unavailable in this environment and the human partner chose an offline TTS over
+creating an account. That changes a load-bearing property of this task.
+
+**Polly could name the phoneme directly** (`<phoneme alphabet="x-amazon-pinyin" ph="le0">`), so every
+inventory entry was synthesizable by construction. **Offline engines cannot** — Piper's Chinese
+frontend derives the reading from characters, so each syllable needs a *representative character*
+the engine will read as that syllable.
+
+Measured against the real inventory (10,709 CJK characters in `dict.json` headwords, 1,344 distinct
+syllables):
+
+| | count | |
+|---|---|---|
+| single-reading representative character exists | **1,259 (94%)** | any competent Chinese TTS must read it correctly |
+| only a multi-reading rep whose default matches | 5 | usable, slightly riskier |
+| **no representative character at all** | **80 (6%)** | 19 neutral-tone, 61 contextual-only |
+
+Those 80 are **structurally unreachable** by the character route, not a matter of searching harder:
+a character in isolation reverts to its citation tone, so a neutral-tone syllable has no
+single-character spelling. `le0` (了, which reads `liao3` alone) is in this set and is very common
+in lyrics.
+
+**Decision:** ship the offline backend; treat the 80 as documented known gaps that degrade to the
+existing per-character "no audio" marker; and keep the Polly path implemented behind a
+`--backend=piper|polly` switch so adding credentials later closes the gap with no rework.
+
+`derivePinyinInventory` therefore returns an object, not a bare array — `syllables`,
+`representatives` (syllable → character), and `unreachable`. The `unreachable` list is data the
+Task 16 coverage test asserts against, exactly as `KNOWN_GAPS` does for the 14 Cantonese gaps.
+
+**Scope for this run:** implement and test the inventory deriver and the dual-backend build script.
+Do NOT download a TTS binary or model, and do NOT run the synthesis — that is an environment change
+the human partner has not authorised. `public/audio/pin/` and `public/data/pinyin.json` stay
+unbuilt, and Task 16's coverage test must be written to skip cleanly when the manifest is absent
+rather than fail.
 
 - [ ] **Step 1: Write the failing test**
 
