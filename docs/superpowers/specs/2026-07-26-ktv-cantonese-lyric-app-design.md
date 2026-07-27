@@ -347,7 +347,7 @@ over both. See "Source ordering" below — the obvious choice turned out to be t
 | Headwords ≤ 3 chars | 106,995 | 1,448 KB | identical to ≤2 |
 | Everything (≤ 6 chars) | 134,383 | 1,966 KB | over-groups 4-char phrases |
 
-**~981 KB gzip. Measured locally with `gzip -9`** against the real sources on 2026-07-26.
+**76,964 entries, 983,920 B gzip (~961 KB). Measured locally with `gzip -9`** against the real sources on 2026-07-26.
 
 ### Correction: the original 245 KB figure was wrong
 

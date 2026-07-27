@@ -10,7 +10,7 @@ const CEDICT = 'https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_m
 // Headwords are capped at 2 characters. Most Chinese compounds are two chars, so
 // the cap costs almost nothing in grouping quality and halves the payload — and it
 // stops greedy longest-match collapsing 愛情故事 into one opaque unit when 愛情 · 故事
-// is the better unit for a learner. Measured 2026-07-26: 77,122 entries, 981 KB gzip.
+// is the better unit for a learner. Measured 2026-07-26: 76,964 entries, 983,920 B gzip.
 const MAX_WORD = 2
 const BUDGET_GZIP = 1_200_000
 

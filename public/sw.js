@@ -1,5 +1,9 @@
 // Cache-first for immutable assets. This also neutralises GitHub Pages'
 // hard-coded Cache-Control: max-age=600, which cannot be overridden.
+// MUST be bumped (e.g. -v2) whenever generated content under /data/ changes
+// (dictionary rebuild, syllable manifest, etc.) -- this is cache-first with
+// no revalidation, so a stale name means returning users never see the new
+// data, even after a hard refresh.
 const CACHE = 'ktv-lyric-audio-v1'
 
 self.addEventListener('activate', (e) => {
