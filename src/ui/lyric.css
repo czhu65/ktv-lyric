@@ -165,3 +165,13 @@ rt {
 }
 .gloss-close:hover { background: var(--bg-sunken); color: var(--ink); }
 .gloss-close:focus-visible { outline: 2px solid var(--accent); }
+
+.lang-toggle {
+  margin-bottom: 0.75rem;
+}
+
+.lang-sub {
+  display: block;
+  font-size: 0.7em;
+  opacity: 0.7;
+}
