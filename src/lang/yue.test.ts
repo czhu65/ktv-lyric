@@ -8,6 +8,7 @@ describe('yuePack', () => {
     expect(yuePack.id).toBe('yue')
     expect(yuePack.audioDir).toBe('audio/syl')
     expect(yuePack.manifest).toBe('data/syllables.json')
+    expect(yuePack.script).toBe('trad')
   })
 
   it('annotates with Jyutping', () => {

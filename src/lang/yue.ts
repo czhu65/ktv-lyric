@@ -15,4 +15,5 @@ export const yuePack: LanguagePack = {
   ],
   audioDir: 'audio/syl',
   manifest: 'data/syllables.json',
+  script: 'trad',
 }

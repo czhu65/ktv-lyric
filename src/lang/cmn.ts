@@ -75,4 +75,5 @@ export const cmnPack: LanguagePack = {
   ],
   audioDir: 'audio/pin',
   manifest: 'data/pinyin.json',
+  script: 'simp',
 }

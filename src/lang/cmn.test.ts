@@ -30,13 +30,29 @@ describe('cmnPack', () => {
     expect(tokens[0].chars).toHaveLength(2)
   })
 
-  it('resolves a polyphone from word context', () => {
-    // 行 is xing2 in 行走 but hang2 in 銀行. pinyin-pro decides; we only
-    // assert the two differ, so the test does not encode one engine version's
-    // exact answer.
+  it('declares that it needs Simplified input', () => {
+    expect(cmnPack.script).toBe('simp')
+  })
+
+  it('resolves a polyphone from word context, given SIMPLIFIED input', () => {
+    // 行 is xing2 in 行走 but hang2 in 银行.
+    //
+    // The input MUST be Simplified: pinyin-pro's polyphone dictionary is
+    // Simplified-keyed, and Traditional 銀行 silently returns yin2 xing2.
+    // That is why LanguagePack carries `script` and why App.tsx converts to
+    // pack.script before calling annotate.
     const walk = cmnPack.annotate('行走', OPTS)[0].chars[0].syllables[0]
+    const bank = cmnPack.annotate('银行', OPTS).flatMap((t) => t.chars)[1].syllables[0]
+    expect(walk).toBe('xing2')
+    expect(bank).toBe('hang2')
+  })
+
+  it('does NOT resolve polyphones on Traditional input — the reason `script` exists', () => {
+    // Characterizes the engine limitation this design works around. If a
+    // future pinyin-pro gains Traditional support this test will fail, which
+    // is the signal to revisit LanguagePack.script — not to delete the test.
     const bank = cmnPack.annotate('銀行', OPTS).flatMap((t) => t.chars)[1].syllables[0]
-    expect(walk).not.toBe(bank)
+    expect(bank).toBe('xing2')
   })
 
   it('offers tone marks first, tone numbers second', () => {

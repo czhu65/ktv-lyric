@@ -44,4 +44,16 @@ export interface LanguagePack {
   audioDir: string
   /** Relative to BASE_URL. */
   manifest: string
+  /**
+   * Which script this pack's annotator REQUIRES. The caller converts the line
+   * to this script before calling annotate().
+   *
+   * to-jyutping fails silently on Simplified mergers, so Cantonese needs
+   * 'trad'. pinyin-pro's polyphone dictionary is Simplified-keyed and falls
+   * back to default per-character readings on Traditional input (銀行 ->
+   * yin2 xing2 instead of hang2; 音樂 -> yin1 le4 instead of yue4), so
+   * Mandarin needs 'simp'. Accepted consequence: a Traditional lyric read as
+   * Mandarin is DISPLAYED in Simplified.
+   */
+  script: 'trad' | 'simp'
 }
