@@ -2542,6 +2542,35 @@ git commit -m "feat(audio): derive the pinyin inventory and synthesize the Manda
 
 ### Task 16: Coverage guard, service worker, credits, ship
 
+### Amendment — no Mandarin bank ships (2026-07-27)
+
+Task 15 built the inventory and the dual-backend script but deliberately did not run synthesis, so
+`public/data/pinyin.json` and `public/audio/pin/` **do not exist**. Two consequences change this
+task:
+
+**1. The coverage test must skip, not fail, when the manifest is absent.** A red suite on a branch
+that is otherwise correct teaches everyone to ignore red. Use `it.skipIf(!existsSync(...))` (or an
+equivalent guard) so the assertions activate automatically the moment a bank is built. The
+`unreachable` list from `derivePinyinInventory` is the expected-gap set — assert against it exactly
+as `KNOWN_GAPS` does for Cantonese's 14, rather than hardcoding a second copy.
+
+**2. A missing manifest must degrade quietly.** Right now switching to Mandarin posts *"Audio failed
+to load — playback may not work. Try reloading."* That is wrong: nothing is broken, the bank simply
+does not exist. The app already has a per-character "no audio" marker (used for the 14 Cantonese
+gaps), which is the correct signal.
+
+In `src/audio/index.ts`, distinguish a legitimate **404** on the manifest from a genuine network
+failure: on 404, resolve with an empty availability set (`available = new Set()`) so `has()` returns
+false for every syllable and every character renders the existing marker. Only a non-404 failure
+should reject and surface the error notice. Keep the not-memoised-on-failure behaviour for real
+failures so a retry is still possible.
+
+Add a test for each path: 404 → resolves, `has()` false, no error; 500 → rejects as before.
+
+**3. Credits must not name a TTS that produced nothing.** No Mandarin audio ships, so credit
+`pinyin-pro` (MIT) for the readings and state plainly that Mandarin pronunciation audio is not yet
+available. Do not credit Polly or Piper for audio that does not exist.
+
 **Files:**
 - Create: `scripts/pinyin-coverage.test.mjs`
 - Modify: `public/sw.js`, `src/ui/Credits.tsx`, `README.md`
