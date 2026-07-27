@@ -1602,6 +1602,30 @@ export async function getCachedLyricByTitleArtist(
 
 Delete `cacheSong`, `getCachedSong`, and `getCachedSongByTitleArtist`, and drop the now-unused `Song` import.
 
+**This breaks `src/App.tsx`, which still calls two of them.** Keeping `tsc`
+green is part of this task, so make the minimal rewiring here rather than
+leaving the branch red until Task 13:
+
+- Import `cacheLyric` and `getCachedLyricByTitleArtist` instead.
+- On a cache hit, the record no longer carries annotated `lines`, so replace
+  `setLines(cached.lines)` with `await annotate(cached.raw, gen)` — the same
+  call the fetch path already makes.
+- Replace the `cacheSong(song)` write with:
+
+```ts
+        void cacheLyric({
+          lrclibId: result.lrclibId,
+          title: c.title,
+          artist: c.artist,
+          raw: result.raw,
+        }).catch(() => {})
+```
+
+- Drop the now-unused `Song` import from `App.tsx`.
+
+Do **not** add the language toggle, pack state, or `langGuess` threading here —
+that is Task 13. This is only enough to keep the build green.
+
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run src/storage/index.test.ts`
