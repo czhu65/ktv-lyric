@@ -44,7 +44,7 @@ describe('LyricView', () => {
   })
 
   it('renders Yale when the setting says so', () => {
-    setup({ settings: { ...DEFAULT_SETTINGS, romanization: 'yale' } })
+    setup({ settings: { ...DEFAULT_SETTINGS, romanization: { ...DEFAULT_SETTINGS.romanization, yue: 'yale' } } })
     expect(screen.getByText('chēung')).toBeInTheDocument()
   })
 
@@ -168,7 +168,7 @@ describe('LyricView', () => {
   })
 
   it('shows Yale romanization inside the popover too, not just the ruby text', async () => {
-    setup({ settings: { ...DEFAULT_SETTINGS, romanization: 'yale' } })
+    setup({ settings: { ...DEFAULT_SETTINGS, romanization: { ...DEFAULT_SETTINGS.romanization, yue: 'yale' } } })
     await userEvent.click(screen.getByRole('button', { name: /唱/ }))
     // The popover's own romanization row covers the whole token (both
     // syllables), so it is distinguishable from any single ruby annotation.

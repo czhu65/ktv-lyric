@@ -18,9 +18,9 @@ describe('settings', () => {
   })
 
   it('round-trips saved settings', () => {
-    saveSettings({ ...DEFAULT_SETTINGS, interLineGapSec: 2.5, romanization: 'yale' })
+    saveSettings({ ...DEFAULT_SETTINGS, interLineGapSec: 2.5, romanization: { yue: 'yale', cmn: 'tonemark' } })
     expect(loadSettings().interLineGapSec).toBe(2.5)
-    expect(loadSettings().romanization).toBe('yale')
+    expect(loadSettings().romanization).toEqual({ yue: 'yale', cmn: 'tonemark' })
   })
 
   it('falls back to defaults on corrupt JSON', () => {
@@ -34,6 +34,42 @@ describe('settings', () => {
     // down from) could still land in localStorage.
     saveSettings({ ...DEFAULT_SETTINGS, interLineGapSec: 999 })
     expect(loadSettings().interLineGapSec).toBeLessThanOrEqual(5)
+  })
+})
+
+describe('romanization settings migration', () => {
+  it('defaults to Jyutping and tone marks', () => {
+    localStorage.clear()
+    expect(loadSettings().romanization).toEqual({ yue: 'jyutping', cmn: 'tonemark' })
+  })
+
+  it('migrates a legacy flat string, preserving the choice', () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ romanization: 'yale' }))
+    expect(loadSettings().romanization).toEqual({ yue: 'yale', cmn: 'tonemark' })
+  })
+
+  it('migrates a legacy jyutping string', () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ romanization: 'jyutping' }))
+    expect(loadSettings().romanization).toEqual({ yue: 'jyutping', cmn: 'tonemark' })
+  })
+
+  it('reads the new shape back unchanged', () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      romanization: { yue: 'yale', cmn: 'tonenum' },
+    }))
+    expect(loadSettings().romanization).toEqual({ yue: 'yale', cmn: 'tonenum' })
+  })
+
+  it('falls back per-language on an unrecognised style id', () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      romanization: { yue: 'bogus', cmn: 'bogus' },
+    }))
+    expect(loadSettings().romanization).toEqual({ yue: 'jyutping', cmn: 'tonemark' })
+  })
+
+  it('survives a completely malformed value', () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ romanization: 42 }))
+    expect(loadSettings().romanization).toEqual({ yue: 'jyutping', cmn: 'tonemark' })
   })
 })
 

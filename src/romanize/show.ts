@@ -6,5 +6,5 @@ import { toYale } from './yale'
 // romanization does the user want to see" decision, and it used to be
 // copy-pasted identically in both files.
 export function showRomanization(s: string, romanization: Settings['romanization']): string {
-  return romanization === 'yale' ? toYale(s) : s
+  return romanization.yue === 'yale' ? toYale(s) : s
 }

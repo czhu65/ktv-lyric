@@ -8,16 +8,26 @@ const STORE = 'songs'
 
 export type Theme = 'system' | 'light' | 'dark'
 
+export interface RomanizationChoice {
+  /** A RomanizationStyle id from the Cantonese pack: 'jyutping' | 'yale' */
+  yue: string
+  /** A RomanizationStyle id from the Mandarin pack: 'tonemark' | 'tonenum' */
+  cmn: string
+}
+
 export interface Settings {
   interLineGapSec: number
-  romanization: 'jyutping' | 'yale'
+  romanization: RomanizationChoice
   rubyPosition: 'over' | 'under'
   theme: Theme
 }
 
+const YUE_STYLES = ['jyutping', 'yale']
+const CMN_STYLES = ['tonemark', 'tonenum']
+
 export const DEFAULT_SETTINGS: Settings = {
   interLineGapSec: 1.0,
-  romanization: 'jyutping',
+  romanization: { yue: 'jyutping', cmn: 'tonemark' },
   rubyPosition: 'over',
   // 'system' rather than 'light': a study tool gets used late at night, and
   // following the OS is the least surprising default.
@@ -25,6 +35,30 @@ export const DEFAULT_SETTINGS: Settings = {
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
+
+/**
+ * Accepts three shapes and always yields a valid choice:
+ *   - the CURRENT object form
+ *   - the LEGACY flat string ('jyutping' | 'yale'), written by every release
+ *     before Mandarin support -- migrated, never discarded, so a user who
+ *     picked Yale keeps Yale
+ *   - anything else -> defaults
+ */
+function readRomanization(raw: unknown): RomanizationChoice {
+  const d = DEFAULT_SETTINGS.romanization
+
+  if (typeof raw === 'string') {
+    return { yue: YUE_STYLES.includes(raw) ? raw : d.yue, cmn: d.cmn }
+  }
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    const r = raw as Partial<RomanizationChoice>
+    return {
+      yue: typeof r.yue === 'string' && YUE_STYLES.includes(r.yue) ? r.yue : d.yue,
+      cmn: typeof r.cmn === 'string' && CMN_STYLES.includes(r.cmn) ? r.cmn : d.cmn,
+    }
+  }
+  return d
+}
 
 export function loadSettings(): Settings {
   try {
@@ -34,7 +68,7 @@ export function loadSettings(): Settings {
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
       return DEFAULT_SETTINGS
     }
-    const p = parsed as Partial<Settings>
+    const p = parsed as Record<string, unknown>
     const gap = Number(p.interLineGapSec ?? DEFAULT_SETTINGS.interLineGapSec)
     return {
       // Clamped to match the settings slider's own max (SettingsPanel.tsx
@@ -42,7 +76,7 @@ export function loadSettings(): Settings {
       // hand-edited/legacy localStorage value could hold a gap the UI can
       // never reproduce or let the user dial back down to from the slider.
       interLineGapSec: clamp(Number.isFinite(gap) ? gap : DEFAULT_SETTINGS.interLineGapSec, 0, 5),
-      romanization: p.romanization === 'yale' ? 'yale' : 'jyutping',
+      romanization: readRomanization(p.romanization),
       rubyPosition: p.rubyPosition === 'under' ? 'under' : 'over',
       theme: p.theme === 'light' || p.theme === 'dark' ? p.theme : 'system',
     }

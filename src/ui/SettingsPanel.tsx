@@ -28,8 +28,8 @@ export default function SettingsPanel(
             </label>
             <select
               id="set-romanization"
-              value={settings.romanization}
-              onChange={(e) => set('romanization', e.target.value as Settings['romanization'])}
+              value={settings.romanization.yue}
+              onChange={(e) => set('romanization', { ...settings.romanization, yue: e.target.value })}
             >
               <option value="jyutping">Jyutping — tone numbers (ngo5)</option>
               <option value="yale">Yale — tone marks (ngóh)</option>
