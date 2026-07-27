@@ -134,6 +134,66 @@ describe('AudioEngine', () => {
     expect(await e.load('zzz9')).toBeNull()
   })
 
+  // --- A decode/fetch failure on a syllable the manifest says SHOULD exist
+  // is unexpected, and used to be silently swallowed into an identical
+  // "null" as a syllable that was simply never recorded -- indistinguishable
+  // from the outside. Logged now (not thrown -- the graceful "no audio"
+  // marker behaviour must not change), so it is diagnosable from a console
+  // (e.g. iOS Safari's remote Web Inspector) instead of looking like nothing
+  // happened at all. ---
+
+  it('logs and still resolves null when decodeAudioData rejects for a manifest-listed syllable', async () => {
+    const ctx = fakeCtx()
+    ctx.decodeAudioData.mockRejectedValueOnce(new Error('EncodingError: Decoding failed'))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const e = createAudioEngine(ctx as unknown as BaseAudioContext)
+    await e.unlock()
+
+    expect(await e.load('coeng3')).toBeNull()
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('coeng3'), expect.any(Error),
+    )
+    errorSpy.mockRestore()
+  })
+
+  it('logs and still resolves null when a manifest-listed clip 404s', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      url.includes('syllables.json')
+        ? new Response(JSON.stringify(['coeng3']))
+        : new Response('', { status: 404 })))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
+    await e.unlock()
+
+    expect(await e.load('coeng3')).toBeNull()
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('coeng3'))
+    errorSpy.mockRestore()
+  })
+
+  // --- iOS Safari mutes Web Audio API output when the phone's ring/silent
+  // switch is on (see ios-unlock.ts) -- a completely separate failure mode
+  // from a decode error, and one AudioContext.resume() cannot fix on its
+  // own. unlockIosAudioSession must run exactly once per engine, inside the
+  // same gesture-triggered unlock() that calls resume(), and its absence
+  // (every OTHER test in this file omits it) must never throw. ---
+
+  describe('iOS audio session unlock', () => {
+    it('calls the injected hook exactly once, even across repeated unlock() calls', async () => {
+      const hook = vi.fn()
+      const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext, {
+        unlockIosAudioSession: hook,
+      })
+      await e.unlock()
+      await e.unlock()
+      expect(hook).toHaveBeenCalledTimes(1)
+    })
+
+    it('never throws when the hook is omitted', async () => {
+      const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
+      await expect(e.unlock()).resolves.toBeUndefined()
+    })
+  })
+
   it('play returns the clip duration for the scheduler', async () => {
     const e = createAudioEngine(fakeCtx() as unknown as BaseAudioContext)
     await e.unlock()

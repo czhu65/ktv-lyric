@@ -4,6 +4,7 @@ import { parseLyricText, type SourceLine } from './lyrics/parse'
 import { normalize, isSimplified, toTraditional, toSimplified } from './script'
 import { loadDict, type Dict } from './dict'
 import { createAudioEngine } from './audio'
+import { unlockIosAudioSession } from './audio/ios-unlock'
 import { createPlayer, type PlayerState } from './player'
 import { loadSettings, saveSettings, cacheLyric, getCachedLyricByTitleArtist, type Settings } from './storage'
 import { getPack, yuePack, type LangId, type LanguagePack } from './lang'
@@ -96,7 +97,14 @@ export default function App() {
   // otherwise sit in memory.
   const enginePack = view?.pack ?? yuePack
   const engine = useMemo(
-    () => createAudioEngine(ctx, { dir: enginePack.audioDir, manifest: enginePack.manifest }),
+    () => createAudioEngine(ctx, {
+      dir: enginePack.audioDir,
+      manifest: enginePack.manifest,
+      // iOS Safari mutes Web Audio API output when the phone's ring/silent
+      // switch is on -- see audio/ios-unlock.ts. This is the one real call
+      // site; every test constructs its own engine and omits it.
+      unlockIosAudioSession,
+    }),
     [ctx, enginePack],
   )
 

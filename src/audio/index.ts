@@ -41,7 +41,15 @@ export interface AudioEngine {
 
 export function createAudioEngine(
   ctx: BaseAudioContext,
-  opts: { dir?: string; manifest?: string; lruMax?: number } = {},
+  opts: {
+    dir?: string
+    manifest?: string
+    lruMax?: number
+    /** Injectable so tests never touch the real `navigator`/`Audio` globals
+     *  -- see ios-unlock.ts. Omitted entirely by every existing call site
+     *  and test; App.tsx is the one real caller that supplies it. */
+    unlockIosAudioSession?: () => void
+  } = {},
 ): AudioEngine {
   const base = import.meta.env.BASE_URL
   const lruMax = opts.lruMax ?? LRU_MAX
@@ -56,6 +64,12 @@ export function createAudioEngine(
   // from an empty Set, which would mean "known, and nothing is available".
   let available: Set<Syllable> | null = null
   let manifestPromise: Promise<void> | null = null
+  // Runs the iOS mute-switch mitigation exactly once per engine instance --
+  // see ios-unlock.ts. Once per instance, not once globally, matches how
+  // App.tsx already treats a language switch: it builds a fresh engine, and
+  // the fresh engine's first tap re-primes the audio session, which is
+  // cheap and harmless to repeat.
+  let iosAudioUnlocked = false
 
   function touch(s: Syllable, b: AudioBuffer) {
     buffers.delete(s)
@@ -96,6 +110,15 @@ export function createAudioEngine(
       // AudioContext starts suspended on Chrome DESKTOP too, not just mobile.
       const c = ctx as unknown as AudioContext
       if (c.state === 'suspended' && typeof c.resume === 'function') await c.resume()
+      // Runs inside the same gesture-triggered call as resume() above, which
+      // is what the mitigation requires -- see ios-unlock.ts. resume()
+      // fixes "the context won't start"; this fixes the separate, iOS-only
+      // "the context runs but the OS mutes it" failure -- one does not
+      // substitute for the other.
+      if (!iosAudioUnlocked) {
+        iosAudioUnlocked = true
+        opts.unlockIosAudioSession?.()
+      }
       await loadManifest()
     },
 
@@ -118,7 +141,16 @@ export function createAudioEngine(
       let p = inflight.get(s)
       if (!p) {
         p = fetch(`${base}${dir}/${s}.mp3`)
-          .then((r) => (r.ok ? r.arrayBuffer() : null))
+          .then((r) => {
+            if (r.ok) return r.arrayBuffer()
+            // has() already said this syllable IS in the manifest, so a
+            // non-ok response here is unexpected -- logged, not silent,
+            // since it would otherwise look identical to a syllable that
+            // was simply never recorded (see the swallowed-error comment
+            // below for why that distinction matters).
+            console.error(`audio: ${dir}/${s}.mp3 -> HTTP ${r.status}`)
+            return null
+          })
           // decodeAudioData sniffs bytes and ignores Content-Type, which makes
           // GitHub Pages' odd `audio/mp3` MIME mapping a non-issue.
           .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
@@ -126,7 +158,19 @@ export function createAudioEngine(
             if (b) touch(s, b)
             return b
           })
-          .catch(() => null)
+          .catch((err: unknown) => {
+            // Logged, not swallowed. The known real-world case: iOS Safari's
+            // decodeAudioData can reject with "EncodingError: Decoding
+            // failed" on some MP3s (a still-open WebKit issue) even though
+            // the identical file decodes fine on Chrome/Android -- see
+            // ios-unlock.ts for the OTHER iOS-only audio failure mode this
+            // can be confused with. Resolving to null either way keeps the
+            // existing graceful "no audio" marker; this only makes the
+            // failure visible to whoever has the console open (e.g. via
+            // Safari's remote Web Inspector).
+            console.error(`audio: failed to load ${dir}/${s}.mp3`, err)
+            return null
+          })
           .finally(() => inflight.delete(s))
         inflight.set(s, p)
       }
