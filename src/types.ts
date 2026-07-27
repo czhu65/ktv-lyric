@@ -33,4 +33,9 @@ export interface SongCandidate {
   artist: string
   album?: string
   durationSec?: number
+  /** iTunes primaryGenreName, verbatim and localized. Kept so the guess can
+   *  be re-derived or debugged without another network call. */
+  genre?: string
+  /** Seeds the language toggle. Undefined when the genre is uninformative. */
+  langGuess?: LangId
 }
