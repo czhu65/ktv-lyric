@@ -21,9 +21,10 @@ page.on('requestfailed', (r) => failedRequests.push(`${r.url()} ${r.failure()?.e
 
 await page.goto(BASE, { waitUntil: 'networkidle' })
 
-// 1. App loads at the subpath
-check('app loads at /ktv-lyric/', (await page.title()).length > 0, await page.title())
-check('heading renders', await page.locator('h1').isVisible())
+// 1. App loads at the subpath, under the right name
+const title = await page.title()
+check('app loads at /ktv-lyric/', title === 'Cantonese KTV Lyrics', title)
+check('heading renders', (await page.locator('h1').innerText()).includes('Cantonese KTV Lyrics'))
 
 // 2. Assets resolve from the subpath, not root
 const scriptSrc = await page.locator('script[type=module]').first().getAttribute('src')
@@ -31,11 +32,11 @@ check('assets served from /ktv-lyric/', !!scriptSrc && scriptSrc.startsWith('/kt
 
 // 3. Search box and the always-available paste fallback
 check('search box present', await page.getByRole('searchbox').isVisible())
-const pasteBtn = page.getByRole('button', { name: /paste/i })
-check('paste fallback always available', await pasteBtn.isVisible())
+const pasteSummary = page.getByText(/paste lyrics manually/i)
+check('paste fallback always available', await pasteSummary.isVisible())
 
 // 4. Paste synthetic text and render it
-await pasteBtn.click()
+await pasteSummary.click()
 await page.locator('#paste-area').fill(SYNTHETIC)
 await page.getByRole('button', { name: /use these lyrics/i }).click()
 await page.waitForSelector('ruby', { timeout: 15000 })
@@ -52,13 +53,27 @@ const charButtons = await page.locator('button.char').count()
 const noAudio = await page.locator('button.char[data-noaudio="true"]').count()
 check('no spurious no-audio markers', noAudio === 0, `${noAudio} of ${charButtons} marked`)
 
-// 6. Yale toggle changes the romanization live
+// 6. Yale toggle changes the romanization live (settings is a disclosure now)
+await page.locator('details.settings > summary').click()
 await page.getByLabel('Romanization').selectOption('yale')
 await page.waitForTimeout(300)
 const yaleRt = (await page.locator('rt').first().innerText()).trim()
 check('Yale toggle changes romanization', yaleRt !== firstRt && !/[1-6]/.test(yaleRt),
   `jyutping "${firstRt}" -> yale "${yaleRt}"`)
 await page.getByLabel('Romanization').selectOption('jyutping')
+
+// 6b. Dark/light theming actually applies to the document
+const beforeTheme = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+await page.locator('.segmented button', { hasText: 'Dark' }).click()
+await page.waitForTimeout(250)
+const afterTheme = await page.evaluate(() => ({
+  attr: document.documentElement.getAttribute('data-theme'),
+  bg: getComputedStyle(document.body).backgroundColor,
+}))
+check('dark theme applies', afterTheme.attr === 'dark' && afterTheme.bg !== beforeTheme,
+  `${beforeTheme} -> ${afterTheme.bg}`)
+await page.locator('.segmented button', { hasText: 'System' }).click()
+await page.locator('details.settings > summary').click()   // collapse again
 
 // 7. Tapping a character opens the gloss for its word
 await page.locator('button.char').first().click()

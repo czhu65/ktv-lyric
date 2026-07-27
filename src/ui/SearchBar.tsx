@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { SongCandidate } from '../types'
+import { SearchIcon } from './icons'
 
 interface Props {
   onSearch(q: string): void
@@ -20,23 +21,31 @@ export default function SearchBar({ onSearch, onPick, results, busy }: Props) {
 
   return (
     <div className="search">
-      <input
-        type="search"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="歌名 — 繁體或簡體皆可 / song title, Traditional or Simplified"
-        aria-label="Song title"
-      />
-      {busy && <p role="status">Searching…</p>}
-      <ul className="results">
-        {results.map((c, i) => (
-          <li key={i}>
-            <button onClick={() => onPick(c)}>
-              <strong>{c.title}</strong> — {c.artist}
-            </button>
-          </li>
-        ))}
-      </ul>
+      <div className="search-field">
+        <SearchIcon />
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="搜尋歌名 · Search a song title"
+          aria-label="Song title"
+        />
+      </div>
+
+      {busy && <p className="search-status" role="status">Searching…</p>}
+
+      {results.length > 0 && (
+        <ul className="results">
+          {results.map((c, i) => (
+            <li key={i}>
+              <button type="button" onClick={() => onPick(c)}>
+                <strong>{c.title}</strong>
+                <span className="artist">{c.artist}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

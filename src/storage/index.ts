@@ -6,16 +6,22 @@ export const SETTINGS_KEY = 'ktvlyric:settings'
 const DB_NAME = 'ktv-lyric-v1'
 const STORE = 'songs'
 
+export type Theme = 'system' | 'light' | 'dark'
+
 export interface Settings {
   interLineGapSec: number
   romanization: 'jyutping' | 'yale'
   rubyPosition: 'over' | 'under'
+  theme: Theme
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   interLineGapSec: 1.0,
   romanization: 'jyutping',
   rubyPosition: 'over',
+  // 'system' rather than 'light': a study tool gets used late at night, and
+  // following the OS is the least surprising default.
+  theme: 'system',
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
@@ -38,6 +44,7 @@ export function loadSettings(): Settings {
       interLineGapSec: clamp(Number.isFinite(gap) ? gap : DEFAULT_SETTINGS.interLineGapSec, 0, 5),
       romanization: p.romanization === 'yale' ? 'yale' : 'jyutping',
       rubyPosition: p.rubyPosition === 'under' ? 'under' : 'over',
+      theme: p.theme === 'light' || p.theme === 'dark' ? p.theme : 'system',
     }
   } catch {
     return DEFAULT_SETTINGS

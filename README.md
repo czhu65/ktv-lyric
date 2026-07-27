@@ -1,4 +1,4 @@
-# ktv-lyric
+# Cantonese KTV Lyrics
 
 A free, non-commercial study tool for learning to sing Canto-pop.
 
@@ -6,7 +6,7 @@ Search a song by title in Traditional **or** Simplified Chinese, and get the lyr
 above every character. Tap any character to hear it pronounced and see what it means. Play a line,
 or the whole lyric, with an adjustable gap between lines.
 
-Not yet deployed — see [Deploying](#deploying) below to publish it.
+**Live:** https://czhu65.github.io/ktv-lyric/
 
 ## How it works
 

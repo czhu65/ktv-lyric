@@ -1,17 +1,43 @@
 import { useState } from 'react'
+import { PasteIcon } from './icons'
 
+/**
+ * The paste path is a first-class tier, not a fallback for failure: the lyric
+ * API misses a substantial share of newer Hong Kong material, so it is always
+ * available rather than appearing only after a search comes up empty.
+ */
 export default function PasteBox({ onSubmit }: { onSubmit(text: string): void }) {
-  const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
 
-  if (!open) {
-    return <button onClick={() => setOpen(true)}>Paste lyrics manually</button>
-  }
   return (
-    <div className="paste">
-      <label htmlFor="paste-area">Paste the lyrics (LRC timestamps are fine)</label>
-      <textarea id="paste-area" rows={12} value={text} onChange={(e) => setText(e.target.value)} />
-      <button onClick={() => onSubmit(text)} disabled={!text.trim()}>Use these lyrics</button>
-    </div>
+    <details className="panel paste">
+      <summary>
+        <PasteIcon />
+        Paste lyrics manually
+      </summary>
+      <div className="panel-body">
+        <label htmlFor="paste-area">
+          Paste any lyric text — <code>[mm:ss.xx]</code> timestamps are fine, and both
+          Traditional and Simplified Chinese are accepted.
+        </label>
+        <textarea
+          id="paste-area"
+          rows={10}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          spellCheck={false}
+        />
+        <div style={{ marginTop: '0.75rem' }}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => onSubmit(text)}
+            disabled={!text.trim()}
+          >
+            Use these lyrics
+          </button>
+        </div>
+      </div>
+    </details>
   )
 }

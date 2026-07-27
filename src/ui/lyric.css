@@ -1,43 +1,167 @@
+/* ============================================================================
+   The lyric surface — the app's only real content.
+   Everything here inherits from the tokens in theme.css.
+   ========================================================================== */
+
+.lyric {
+  font-family: var(--font-han);
+  margin-block: 1.5rem;
+}
+
 /* Word grouping is SPACING, not decoration — the lyric must still read as a
    lyric. Grouping is derived from the dictionary keys, not from to-jyutping,
-   which exposes no segmentation API. */
-.lyric-line { line-height: 2.6; margin: 0 0 0.75rem; }
-.token { display: inline-block; margin-inline-end: 0.35em; }
-.token[data-word] { border-radius: 4px; }
-@media (hover: hover) { .token[data-word]:hover { background: rgba(127,127,127,0.12); } }
+   which exposes no segmentation API, so a mis-grouped word is cosmetic and can
+   never change a pronunciation. Boxing words would make that cosmetic slip look
+   like a claim about the language. */
+.lyric-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.125rem;
+  line-height: 2.4;
+  margin: 0;
+  padding: 0.25rem 0.25rem 0.25rem 0;
+  border-radius: var(--radius);
+  transition: background 160ms ease;
+}
+
+/* The line currently sounding gets a whole-line wash, so you can keep your
+   place at a glance without the per-character marker having to shout. */
+.lyric-line[data-active='true'] {
+  background: color-mix(in srgb, var(--highlight) 22%, transparent);
+}
+
+.token {
+  display: inline-flex;
+  margin-inline-end: 0.3em;
+  border-radius: 6px;
+}
+@media (hover: hover) {
+  .token[data-word]:hover { background: var(--bg-sunken); }
+}
 
 .char {
   all: unset;
   cursor: pointer;
-  display: inline-block;
-  min-width: 44px;    /* touch target */
-  min-height: 44px;
-  text-align: center;
-  font-size: 1.5rem;
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding-inline: 0.05em;
+  border-radius: 6px;
+  font-size: var(--step-2);
+  transition: background 100ms ease;
 }
-.char:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
-.char[data-active='true'] { background: rgba(255,200,0,0.35); border-radius: 4px; }
-.char[data-noaudio='true'] { text-decoration: underline dotted; text-underline-offset: 4px; }
+@media (hover: hover) {
+  .char:hover { background: var(--accent-soft); }
+}
+.char:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.char[data-active='true'] {
+  background: var(--highlight);
+  color: var(--highlight-ink);
+}
+
+/* Reserved for the 14 syllables that genuinely have no recording — see
+   docs/known-audio-gaps.md. It must never appear on ordinary characters. */
+.char[data-noaudio='true'] {
+  text-decoration: underline dotted var(--ink-faint);
+  text-underline-offset: 5px;
+}
+
+/* No whitespace between ruby elements in the markup, or browsers insert stray
+   spaces that visibly break alignment over each character. */
+rt {
+  font: inherit;
+  font-family: var(--font-ui);
+  font-size: 0.44em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+  letter-spacing: 0.01em;
+}
+.char[data-active='true'] rt { color: var(--highlight-ink); }
+.ruby-under rt { ruby-position: under; }
+
+.punct {
+  display: inline-grid;
+  place-items: center;
+  min-height: var(--tap);
+  color: var(--ink-faint);
+  font-size: var(--step-2);
+}
 
 .play-line {
   all: unset;
   cursor: pointer;
-  opacity: 0.4;
-  padding: 0 0.5rem;
-  min-width: 44px; min-height: 44px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 2rem;
+  min-height: var(--tap);
+  margin-inline-end: 0.25rem;
+  border-radius: 6px;
+  color: var(--ink-faint);
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease;
+  flex: none;
 }
-.play-line:hover, .play-line:focus-visible { opacity: 1; }
+.play-line svg { width: 0.875rem; height: 0.875rem; }
+/* Revealed on hover on pointer devices; always visible on touch, where there
+   is no hover to reveal it with. */
+@media (hover: hover) {
+  .lyric-line:hover .play-line { opacity: 1; }
+}
+@media (hover: none) {
+  .play-line { opacity: 0.55; }
+}
+.play-line:focus-visible { opacity: 1; outline: 2px solid var(--accent); }
+.play-line:hover { color: var(--accent); }
 
-rt { font: inherit; font-size: 0.5em; opacity: 0.75; }
-.ruby-under rt { ruby-position: under; }
-.punct { opacity: 0.5; font-size: 1.5rem; }
+/* ---------------------------------------------------------- gloss card ---- */
 
 .gloss {
-  position: sticky; bottom: 0;
-  padding: 0.75rem 1rem;
-  background: Canvas; color: CanvasText;
-  border-top: 1px solid rgba(127,127,127,0.4);
+  position: sticky;
+  bottom: 5.5rem;   /* clears the fixed transport bar */
+  z-index: 25;
+  margin-top: 1rem;
+  padding: 0.875rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 1rem;
 }
-.gloss-word { font-size: 1.25rem; }
-.gloss-rom { opacity: 0.7; font-size: 0.9rem; }
-.gloss-close { float: inline-end; all: unset; cursor: pointer; padding: 0 0.5rem; }
+.gloss-word {
+  grid-column: 1;
+  font-family: var(--font-han);
+  font-size: var(--step-2);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.gloss-rom {
+  grid-column: 1;
+  font-size: var(--step--1);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.gloss-def {
+  grid-column: 1 / -1;
+  font-size: var(--step-0);
+  color: var(--ink-muted);
+}
+.gloss-close {
+  all: unset;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  border-radius: var(--radius);
+  color: var(--ink-faint);
+  align-self: start;
+}
+.gloss-close:hover { background: var(--bg-sunken); color: var(--ink); }
+.gloss-close:focus-visible { outline: 2px solid var(--accent); }

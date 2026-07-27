@@ -45,7 +45,12 @@ describe('App', () => {
 
   it('always offers the paste fallback — LRCLIB misses 20-40% of modern HK songs', () => {
     render(<App />)
-    expect(screen.getByRole('button', { name: /paste/i })).toBeInTheDocument()
+    // A native <details>/<summary> disclosure, so it is queried by its text
+    // rather than a button role. What matters is that it is present on first
+    // load, with no failed search required to reveal it.
+    const summary = screen.getByText(/paste lyrics manually/i)
+    expect(summary).toBeInTheDocument()
+    expect(summary.closest('details')).not.toBeNull()
   })
 
   // --- Finding 1 / Finding 5: search-path rate limiting ---
@@ -109,8 +114,8 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: /paste lyrics manually/i }))
-    await user.type(screen.getByLabelText(/paste the lyrics/i), '唱歌')
+    await user.click(screen.getByText(/paste lyrics manually/i))
+    await user.type(screen.getByLabelText(/paste any lyric text/i), '唱歌')
     await user.click(screen.getByRole('button', { name: /use these lyrics/i }))
 
     const notice = await screen.findByRole('alert', {}, { timeout: 2000 })

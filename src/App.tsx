@@ -14,6 +14,7 @@ import Transport from './ui/Transport'
 import SettingsPanel from './ui/SettingsPanel'
 import LyricView from './ui/LyricView'
 import Credits from './ui/Credits'
+import ThemeToggle from './ui/ThemeToggle'
 
 // Shared by onSearch and onPick: whichever path hits LRCLIB's rate limit,
 // the user sees the identical, delay-naming message rather than two
@@ -219,29 +220,58 @@ export default function App() {
   }, [annotate])
 
   return (
-    <main>
-      <h1>KTV Lyric</h1>
-      <SearchBar onSearch={onSearch} onPick={onPick} results={results} busy={busy} />
-      {notice && <p role="alert">{notice}</p>}
-      <PasteBox onSubmit={onPaste} />
-      <SettingsPanel settings={settings} onChange={setSettings} />
-
-      {lines.length > 0 && dict && (
-        <>
-          <Transport
-            playing={pstate.playing}
-            onPlayAll={() => player.playAll(lines)}
-            onStop={() => player.stop()}
+    <div className="app">
+      <header className="app-header">
+        <div className="app-header-inner">
+          <h1 className="app-title">
+            Cantonese KTV Lyrics<span className="zh">粵語歌詞</span>
+          </h1>
+          <ThemeToggle
+            theme={settings.theme}
+            onChange={(t) => setSettings((s) => ({ ...s, theme: t }))}
           />
+        </div>
+      </header>
+
+      <main className="app-main">
+        <SearchBar onSearch={onSearch} onPick={onPick} results={results} busy={busy} />
+
+        {notice && <p className="notice" role="alert">{notice}</p>}
+
+        <PasteBox onSubmit={onPaste} />
+        <SettingsPanel settings={settings} onChange={setSettings} />
+
+        {lines.length > 0 && dict ? (
           <LyricView
             lines={lines} dict={dict} engine={engine} settings={settings}
             activeLine={pstate.lineIndex} activeChar={pstate.charIndex}
             audioReady={audioReady}
             onPlayLine={(i) => player.playLine(lines[i], i)}
           />
-        </>
+        ) : (
+          <div className="empty">
+            <p className="empty-title">睇歌詞，學發音</p>
+            <p>
+              Search for a song above, or paste a lyric in. Every character gets its Cantonese
+              reading — tap one to hear it and see what the word means.
+            </p>
+          </div>
+        )}
+
+        <Credits />
+      </main>
+
+      {/* Rendered outside <main> because it is fixed to the viewport, not to
+          the document flow. */}
+      {lines.length > 0 && dict && (
+        <Transport
+          playing={pstate.playing}
+          onPlayAll={() => player.playAll(lines)}
+          onStop={() => player.stop()}
+          gapSec={settings.interLineGapSec}
+          onGapChange={(sec) => setSettings((s) => ({ ...s, interLineGapSec: sec }))}
+        />
       )}
-      <Credits />
-    </main>
+    </div>
   )
 }
