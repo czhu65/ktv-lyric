@@ -271,4 +271,46 @@ describe('AudioEngine', () => {
     expect(e.duration('go1')).toBeCloseTo(0.42)
     expect(await e.load('zzz9')).toBeNull()
   })
+
+  describe('createAudioEngine directory and manifest options', () => {
+    it('defaults to the Cantonese bank', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ['ngo5'] })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const engine = createAudioEngine(new AudioContext())
+      await engine.preloadManifest()
+
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('data/syllables.json'))
+    })
+
+    it('fetches the manifest named in options', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ['wo3'] })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const engine = createAudioEngine(new AudioContext(), {
+        dir: 'audio/pin',
+        manifest: 'data/pinyin.json',
+      })
+      await engine.preloadManifest()
+
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('data/pinyin.json'))
+      expect(engine.has('wo3')).toBe(true)
+    })
+
+    it('loads clips from the directory named in options', async () => {
+      const fetchMock = vi.fn().mockImplementation((url: string) =>
+        url.includes('.json')
+          ? Promise.resolve({ ok: true, json: async () => ['wo3'] })
+          : Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const ctx = new AudioContext()
+      const engine = createAudioEngine(ctx, { dir: 'audio/pin', manifest: 'data/pinyin.json' })
+      await engine.preloadManifest()
+      await engine.load('wo3')
+
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('audio/pin/wo3.mp3'))
+    })
+  })
 })

@@ -41,10 +41,15 @@ export interface AudioEngine {
 
 export function createAudioEngine(
   ctx: BaseAudioContext,
-  opts: { lruMax?: number } = {},
+  opts: { dir?: string; manifest?: string; lruMax?: number } = {},
 ): AudioEngine {
   const base = import.meta.env.BASE_URL
   const lruMax = opts.lruMax ?? LRU_MAX
+  // Defaulted to the Cantonese bank so every existing call site -- and every
+  // existing test -- keeps working without opting in. The Mandarin pack
+  // supplies its own pair via LanguagePack.audioDir / .manifest.
+  const dir = opts.dir ?? 'audio/syl'
+  const manifest = opts.manifest ?? 'data/syllables.json'
   const buffers = new Map<Syllable, AudioBuffer>()
   const inflight = new Map<Syllable, Promise<AudioBuffer | null>>()
   // null = "not yet known" (manifest hasn't loaded). Deliberately distinct
@@ -62,9 +67,9 @@ export function createAudioEngine(
   // (mirrors src/dict/index.ts) so a transient network blip doesn't
   // permanently strand has()/duration() on "assume everything is available".
   function loadManifest(): Promise<void> {
-    manifestPromise ??= fetch(`${base}data/syllables.json`)
+    manifestPromise ??= fetch(`${base}${manifest}`)
       .then((r) => {
-        if (!r.ok) throw new Error(`syllables.json -> HTTP ${r.status}`)
+        if (!r.ok) throw new Error(`${manifest} -> HTTP ${r.status}`)
         return r.json() as Promise<Syllable[]>
       })
       .then((list) => { available = new Set(list) })
@@ -101,7 +106,7 @@ export function createAudioEngine(
 
       let p = inflight.get(s)
       if (!p) {
-        p = fetch(`${base}audio/syl/${s}.mp3`)
+        p = fetch(`${base}${dir}/${s}.mp3`)
           .then((r) => (r.ok ? r.arrayBuffer() : null))
           // decodeAudioData sniffs bytes and ignores Content-Type, which makes
           // GitHub Pages' odd `audio/mp3` MIME mapping a non-issue.
