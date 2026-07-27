@@ -23,8 +23,8 @@ await page.goto(BASE, { waitUntil: 'networkidle' })
 
 // 1. App loads at the subpath, under the right name
 const title = await page.title()
-check('app loads at /ktv-lyric/', title === 'Cantonese KTV Lyrics', title)
-check('heading renders', (await page.locator('h1').innerText()).includes('Cantonese KTV Lyrics'))
+check('app loads at /ktv-lyric/', title === 'Cantonese & Mandarin KTV Lyrics', title)
+check('heading renders', (await page.locator('h1').innerText()).includes('KTV Lyrics'))
 
 // 2. Assets resolve from the subpath, not root
 const scriptSrc = await page.locator('script[type=module]').first().getAttribute('src')
